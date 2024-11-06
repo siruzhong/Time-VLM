@@ -1,5 +1,5 @@
 checkpoints/*
 dataset/*
-/src/visionts/__pycache__/*
+**/__pycache__/
 tutorial/ckpt/*
 tutorial/Copy of ckpt/*
