@@ -163,7 +163,7 @@ class DataEmbedding_wo_pos(nn.Module):
 
 
 class PatchEmbedding(nn.Module):
-    def __init__(self, d_model, patch_len, stride, padding, dropout):
+    def __init__(self, d_model, patch_len, stride, padding=0, dropout=0.1):
         super(PatchEmbedding, self).__init__()
         # Patching
         self.patch_len = patch_len
