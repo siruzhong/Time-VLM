@@ -1,4 +1,4 @@
-checkpoints/*
+checkpoints
 dataset/*
 **/__pycache__/
 tutorial/ckpt
