@@ -116,3 +116,12 @@ def adjustment(gt, pred):
 
 def cal_accuracy(y_pred, y_true):
     return np.mean(y_pred == y_true)
+
+def load_content(args):
+    if 'ETT' in args.data:
+        file = 'ETT'
+    else:
+        file = args.data
+    with open('./dataset/prompt_bank/{0}.txt'.format(file), 'r') as f:
+        content = f.read()
+    return content
