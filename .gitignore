@@ -1,9 +1,10 @@
 checkpoints/*
 dataset/*
 **/__pycache__/
-tutorial/ckpt/*
-tutorial/Copy of ckpt/*
+tutorial/ckpt
+tutorial/Copy of ckpt
 tutorial/*.pth
+tutorial/checkpoints
 results
 test_results
 /*.txt
