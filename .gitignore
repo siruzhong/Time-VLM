@@ -3,3 +3,9 @@ dataset/*
 **/__pycache__/
 tutorial/ckpt/*
 tutorial/Copy of ckpt/*
+tutorial/*.pth
+results
+test_results
+/*.txt
+!requirement.txt
+ckpt
