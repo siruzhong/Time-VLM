@@ -7,6 +7,7 @@ from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
 from exp.exp_classification import Exp_Classification
 from utils.print_args import print_args
+from utils.tools import load_content
 import random
 import numpy as np
 
@@ -16,7 +17,7 @@ if __name__ == '__main__':
     torch.manual_seed(fix_seed)
     np.random.seed(fix_seed)
 
-    parser = argparse.ArgumentParser(description='TimesNet')
+    parser = argparse.ArgumentParser(description='TimeVLM')
 
     # basic config
     parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
@@ -58,7 +59,7 @@ if __name__ == '__main__':
     parser.add_argument('--enc_in', type=int, default=7, help='encoder input size')
     parser.add_argument('--dec_in', type=int, default=7, help='decoder input size')
     parser.add_argument('--c_out', type=int, default=7, help='output size')
-    parser.add_argument('--d_model', type=int, default=32, help='dimension of model')
+    parser.add_argument('--d_model', type=int, default=256, help='dimension of model')
     parser.add_argument('--n_heads', type=int, default=8, help='num of heads')
     parser.add_argument('--e_layers', type=int, default=2, help='num of encoder layers')
     parser.add_argument('--d_layers', type=int, default=1, help='num of decoder layers')
@@ -135,13 +136,15 @@ if __name__ == '__main__':
     parser.add_argument('--llm_dim', type=int, default='768', help='LLM model dimension')# LLama7b:4096; GPT2-small:768; BERT-base:768
     parser.add_argument('--stride', type=int, default=8, help='stride')
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')
-    parser.add_argument('--llm_layers', type=int, default=12)
+    parser.add_argument('--llm_layers', type=int, default=2)
     parser.add_argument('--prompt_domain', type=int, default=0, help='')
 
     parser.add_argument('--periodicity', type=int, default=96)
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
     parser.add_argument('--align_const', type=float, default=0.4)
+
+    parser.add_argument('--wo_ts', type=int, default=0, help='without/with Time Series Data 1/0')
 
     args = parser.parse_args()
     # args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
@@ -154,6 +157,9 @@ if __name__ == '__main__':
         device_ids = args.devices.split(',')
         args.device_ids = [int(id_) for id_ in device_ids]
         args.gpu = args.device_ids[0]
+
+    
+    args.content = load_content(args)
 
     print('Args in experiment:')
     print_args(args)
