@@ -17,6 +17,11 @@ mse: 0.6548710465431213, mae: 0.5380685329437256, dtw: not calculated # dt = 58
 
 Test version4: 如果去掉了原始的时序模态
 mse: 0.6748389601707458, mae: 0.5418227910995483, dtw: not calculated
+
+1.文本冗余信息太多
+2.loss->计算多个y
+3.原时序数据->残差/embed进计算
+
 '''
 
 
@@ -42,10 +47,8 @@ from layers.Embed import PatchEmbedding
 from layers.models_mae import * 
 from transformers.models.vilt import *
 from transformers import GPT2Tokenizer, GPT2Model, GPT2Config
-from ts2image import VisionTS
-from ts2text import TimeLLM
-from ts2text import ReprogrammingLayer
-from ts2text import TimeSeriesEmbeddingFusion
+from .ts2image import VisionTS
+from .ts2text import TimeLLM,ReprogrammingLayer,TimeSeriesEmbeddingFusion
 
 
 class FusionLayer(nn.Module):

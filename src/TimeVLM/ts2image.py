@@ -169,6 +169,7 @@ class VisionTS(nn.Module):
             )
             image_reconstructed = self.vision_model.unpatchify(y)  # 重建图像
 
+       
         # 5. 转为灰度图并调整为输出形式
         y_grey = torch.mean(image_reconstructed, 1, keepdim=True)  # 转为灰度图
         y_segmentations = self.output_resize(y_grey)  # 调整灰度图尺寸
@@ -178,7 +179,7 @@ class VisionTS(nn.Module):
             b=x_enc.shape[0], f=self.periodicity
         ) # 恢复为时序数据形式
         
-        return y, image_reconstructed  # 返回预测结果和重建图像
+        return y1+y2+y3, image_reconstructed
 
 
 def safe_resize(size, interpolation):

@@ -1,15 +1,15 @@
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=1
 
-model_name=TimeVLM
+model_name=TimeDiff
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_96 \
+  --data_path ETTm1.csv \
+  --model_id ETTm1_96_96 \
   --model $model_name \
-  --data ETTh1 \
+  --data ETTm1 \
   --features M \
   --seq_len 96 \
   --label_len 48 \
@@ -21,7 +21,4 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1 \
-  --d_model 256 \
-  --d_ff 768 \
-  --llm_dim 768 \ 
+  --itr 1
