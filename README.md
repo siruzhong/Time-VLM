@@ -1,4 +1,4 @@
-# TimeMM: Bridging Visual and Textual Modalities for Enhanced Time Series Forecasting
+# Time-VLM: Bridging Time Series and Language via Visuals for Enhanced Forecasting
 
 ### Usage
 1. Install Python 3.8. For convenience, execute the following command.
