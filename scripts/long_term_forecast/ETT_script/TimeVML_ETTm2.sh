@@ -1,18 +1,15 @@
-export CUDA_VISIBLE_DEVICES=2
+model_name=TimeVLM
 
-model_name=TimeDiff
-
-python -u run_diff.py \
+python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_96 \
+  --data_path ETTm2.csv \
+  --model_id ETTm2_96_48 \
   --model $model_name \
-  --data ETTh1 \
+  --data ETTm2 \
   --features M \
   --seq_len 96 \
-  --label_len 48 \
   --pred_len 96 \
   --e_layers 2 \
   --d_layers 1 \
@@ -21,19 +18,19 @@ python -u run_diff.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
+  --learning_rate 0.001 \
   --itr 1
 
-python -u run_diff.py \
+python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_192 \
+  --data_path ETTm2.csv \
+  --model_id ETTm2_192_96 \
   --model $model_name \
-  --data ETTh1 \
+  --data ETTm2 \
   --features M \
   --seq_len 96 \
-  --label_len 48 \
   --pred_len 192 \
   --e_layers 2 \
   --d_layers 1 \
@@ -42,19 +39,19 @@ python -u run_diff.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
+  --learning_rate 0.001 \
   --itr 1
 
-python -u run_diff.py \
+python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_336 \
+  --data_path ETTm2.csv \
+  --model_id ETTm2_288_144 \
   --model $model_name \
-  --data ETTh1 \
+  --data ETTm2 \
   --features M \
   --seq_len 96 \
-  --label_len 48 \
   --pred_len 336 \
   --e_layers 2 \
   --d_layers 1 \
@@ -63,19 +60,19 @@ python -u run_diff.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
+  --learning_rate 0.001 \
   --itr 1
 
-python -u run_diff.py \
+python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh1.csv \
-  --model_id ETTh1_96_720 \
+  --data_path ETTm2.csv \
+  --model_id ETTm2_384_192 \
   --model $model_name \
-  --data ETTh1 \
+  --data ETTm2 \
   --features M \
   --seq_len 96 \
-  --label_len 48 \
   --pred_len 720 \
   --e_layers 2 \
   --d_layers 1 \
@@ -84,4 +81,5 @@ python -u run_diff.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
+  --learning_rate 0.001 \
   --itr 1

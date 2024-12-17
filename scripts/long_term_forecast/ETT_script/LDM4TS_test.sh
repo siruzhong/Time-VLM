@@ -1,6 +1,6 @@
-model_name=TimeDiff
+model_name=LDM4TS
 
-python -u run_diff.py \
+python -u run_ldm.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \

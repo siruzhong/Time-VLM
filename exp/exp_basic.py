@@ -4,13 +4,10 @@ from models import Autoformer, Transformer, TimesNet, Nonstationary_Transformer,
     Informer, LightTS, Reformer, ETSformer, Pyraformer, PatchTST, MICN, Crossformer, FiLM, iTransformer, \
     Koopa, TiDE, FreTS, TimeMixer, TSMixer, SegRNN, MambaSimple, TemporalFusionTransformer, SCINet, PAttn, TimeXer,TimeLLM,VisionTS
 
-from src.TimeVLM import model as TimeVLM
-
 class Exp_Basic(object):
     def __init__(self, args):
         self.args = args
         self.model_dict = {
-            'TimeVLM': TimeVLM,
             'TimeLLM': TimeLLM,
             'VisionTS': VisionTS,
             'TimesNet': TimesNet,
@@ -45,9 +42,28 @@ class Exp_Basic(object):
             print('Please make sure you have successfully installed mamba_ssm')
             from models import Mamba
             self.model_dict['Mamba'] = Mamba
+        if args.model == 'TimeVLM':
+            from src.TimeVLM import model as TimeVLM
+            self.model_dict['TimeVLM'] = TimeVLM
+        if args.model == 'LDM4TS':
+            from src.LDM4TS import model as LDM4TS
+            self.model_dict['LDM4TS'] = LDM4TS
 
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
+        
+        self._log_model_parameters()
+        
+        
+    def _log_model_parameters(self):
+        """
+        打印模型的参数量。
+        """
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        total_params = count_parameters(self.model)
+        print(f"Model Parameters: {total_params:,}")
 
     def _build_model(self):
         raise NotImplementedError

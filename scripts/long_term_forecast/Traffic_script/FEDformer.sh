@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=0
 
-model_name=Autoformer
+model_name=FEDformer
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -20,9 +20,11 @@ python -u run.py \
   --enc_in 862 \
   --dec_in 862 \
   --c_out 862 \
+  --d_model 512 \
+  --d_ff 512 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -42,9 +44,11 @@ python -u run.py \
   --enc_in 862 \
   --dec_in 862 \
   --c_out 862 \
+  --d_model 512 \
+  --d_ff 512 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -64,9 +68,11 @@ python -u run.py \
   --enc_in 862 \
   --dec_in 862 \
   --c_out 862 \
+  --d_model 512 \
+  --d_ff 512 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -86,6 +92,8 @@ python -u run.py \
   --enc_in 862 \
   --dec_in 862 \
   --c_out 862 \
+  --d_model 512 \
+  --d_ff 512 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1

@@ -1,13 +1,13 @@
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 
-model_name=Autoformer
+model_name=DLinear
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/traffic/ \
-  --data_path traffic.csv \
-  --model_id traffic_96_96 \
+  --root_path ./dataset/weather/ \
+  --data_path weather.csv \
+  --model_id weather_96_96 \
   --model $model_name \
   --data custom \
   --features M \
@@ -17,19 +17,21 @@ python -u run.py \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 862 \
-  --dec_in 862 \
-  --c_out 862 \
+  --enc_in 21 \
+  --dec_in 21 \
+  --c_out 21 \
+  --d_model 32 \
+  --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/traffic/ \
-  --data_path traffic.csv \
-  --model_id traffic_96_192 \
+  --root_path ./dataset/weather/ \
+  --data_path weather.csv \
+  --model_id weather_96_192 \
   --model $model_name \
   --data custom \
   --features M \
@@ -39,19 +41,23 @@ python -u run.py \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 862 \
-  --dec_in 862 \
-  --c_out 862 \
+  --enc_in 21 \
+  --dec_in 21 \
+  --c_out 21 \
+  --d_model 32 \
+  --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --train_epochs 3
+  --train_epochs 1
+
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/traffic/ \
-  --data_path traffic.csv \
-  --model_id traffic_96_336 \
+  --root_path ./dataset/weather/ \
+  --data_path weather.csv \
+  --model_id weather_96_336 \
   --model $model_name \
   --data custom \
   --features M \
@@ -61,19 +67,21 @@ python -u run.py \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 862 \
-  --dec_in 862 \
-  --c_out 862 \
+  --enc_in 21 \
+  --dec_in 21 \
+  --c_out 21 \
+  --d_model 32 \
+  --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
-  --itr 1 \
-  --train_epochs 3
+  --itr 1
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/traffic/ \
-  --data_path traffic.csv \
-  --model_id traffic_96_720 \
+  --root_path ./dataset/weather/ \
+  --data_path weather.csv \
+  --model_id weather_96_720 \
   --model $model_name \
   --data custom \
   --features M \
@@ -83,9 +91,12 @@ python -u run.py \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 862 \
-  --dec_in 862 \
-  --c_out 862 \
+  --enc_in 21 \
+  --dec_in 21 \
+  --c_out 21 \
+  --d_model 32 \
+  --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --train_epochs 3
+  --train_epochs 1

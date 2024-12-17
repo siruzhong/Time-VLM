@@ -12,7 +12,6 @@ import pdb
 
 warnings.filterwarnings('ignore')
 
-
 class Exp_Classification(Exp_Basic):
     def __init__(self, args):
         super(Exp_Classification, self).__init__(args)
@@ -128,6 +127,8 @@ class Exp_Classification(Exp_Basic):
             train_loss = np.average(train_loss)
             vali_loss, val_accuracy = self.vali(vali_data, vali_loader, criterion)
             test_loss, test_accuracy = self.vali(test_data, test_loader, criterion)
+
+            wandb.log({"Train Loss": train_loss, "Vali Loss": vali_loss, "Vali Acc": val_accuracy, "Test Loss": test_loss, "Test Acc": test_accuracy})
 
             print(
                 "Epoch: {0}, Steps: {1} | Train Loss: {2:.3f} Vali Loss: {3:.3f} Vali Acc: {4:.3f} Test Loss: {5:.3f} Test Acc: {6:.3f}"

@@ -10,3 +10,8 @@ test_results
 /*.txt
 !requirement.txt
 ckpt
+wandb/
+src/TimeDiff/visualizations
+image_visualization
+output_images
+src/LDM4TS/visualizations
