@@ -1,4 +1,9 @@
 def print_args(args):
+    if hasattr(args, 'content'):
+        print("\033[1m" + "Content" + "\033[0m")
+        print(f'  {"Content:":<20}{args.content}')
+        print()
+
     print("\033[1m" + "Basic Config" + "\033[0m")
     print(f'  {"Task Name:":<20}{args.task_name:<20}{"Is Training:":<20}{args.is_training:<20}')
     print(f'  {"Model ID:":<20}{args.model_id:<20}{"Model:":<20}{args.model:<20}')

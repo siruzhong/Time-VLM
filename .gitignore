@@ -13,5 +13,6 @@ ckpt
 wandb/
 src/TimeDiff/visualizations
 image_visualization
+timevlm_image_visualization
 output_images
 src/LDM4TS/visualizations
