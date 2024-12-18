@@ -43,12 +43,12 @@ class Model(nn.Module):
         # 初始化BLIP-2的处理器和模型，用于提取图像和文本特征
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
         self.blip2_processor = Blip2Processor.from_pretrained(BLIP_ARCH)
-        self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH)
+        self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
         
         # MLP预测器，将BLIP-2输出的多模态嵌入转换为最终的时序预测结果
-        hidden_size = 768 # self.blip2_model.config.text_config.hidden_size
+        hidden_size = 2560 # self.blip2_model.config.text_config.hidden_size
         self.sequence_projection = nn.Sequential(
-            nn.Linear(32, self.pred_len),  # 将固定长度 32 投影到目标预测长度
+            nn.Linear(290, self.pred_len),  # 将固定长度 32 投影到目标预测长度
             nn.ReLU()
         )
         self.predictor = nn.Sequential(
@@ -124,7 +124,7 @@ class Model(nn.Module):
         return prompts
 
     @staticmethod
-    def time_series_to_image(x_enc, context_len, periodicity=1, norm_const=0.4, interpolation='bilinear'):
+    def time_series_to_image(x_enc, context_len, periodicity=1, interpolation='bilinear'):
         """
         将时间序列数据转换为图像形式，以便后续处理。
 
@@ -133,7 +133,6 @@ class Model(nn.Module):
                     batch_size 是批大小，context_len 是时间序列的长度，nvars 是每个时间步的特征数量。
         - context_len (int): 时间序列的上下文长度，用于确定需要处理的时间步数。
         - periodicity (int): 每个时间步的周期性，默认值为1，表示每个时间步处理一个特征。
-        - norm_const (float): 标准化常量，用于调整标准差，默认值为0.4。
         - interpolation (str): 插值方式，用于调整图像大小。可选值有 'bilinear', 'nearest', 'bicubic'。
 
         返回：
@@ -216,7 +215,7 @@ class Model(nn.Module):
         device = x_enc.device
 
         # 归一化
-        x_enc, means, stdev = Normalization(x_enc)
+        x_enc, means, stdev = Normalization(x_enc, 0.4)
 
         # 1. 将时间序列数据转换为图像
         images = self.time_series_to_image(x_enc, self.seq_len)
@@ -236,8 +235,8 @@ class Model(nn.Module):
             prompts = prompts[:B] if len(prompts) > B else prompts + [prompts[-1]] * (B - len(prompts))
 
         # 3. 使用BLIP-2的处理器和模型提取嵌入
-        hidden_dim = 768  # BLIP-2 默认的隐藏层维度
-        seq_len = 32  # Q-Former 输出的序列长度
+        hidden_dim = 2560  # BLIP-2 默认的隐藏层维度
+        seq_len = 290  # LLM 输出的序列长度
         batch_size = 32  # 根据内存情况调整
 
         embeddings_list = []  # 用于存储每个批次的嵌入
@@ -247,7 +246,7 @@ class Model(nn.Module):
             batch_images = images[i:end_idx]
             batch_prompts = prompts[i:end_idx]
 
-            print(f"Processing batch {i} to {end_idx} - Images shape: {batch_images.shape}, Prompts length: {len(batch_prompts)}")
+            # print(f"Processing batch {i} to {end_idx} - Images shape: {batch_images.shape}, Prompts length: {len(batch_prompts)}")
 
             try:
                 # 处理器编码
@@ -259,11 +258,18 @@ class Model(nn.Module):
                 ).to(device, torch.float16)
 
                 with torch.no_grad():
-                    blip2_outputs = self.blip2_model(**encoding)
+                    blip2_outputs = self.blip2_model(**encoding, output_hidden_states=True)
+                    # print("blip2_outputs.shape", blip2_outputs.keys()) # odict_keys(['logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs'])
 
-                # 提取Q-Former的输出作为嵌入
-                qformer_outputs = blip2_outputs.qformer_outputs.last_hidden_state  # [batch_size, seq_len, hidden_dim]
-                embeddings_list.append(qformer_outputs)
+                # 提取language_model_outputs的输出作为嵌入
+                language_model_outputs = blip2_outputs.language_model_outputs.hidden_states[-1]
+                # 截断操作，只保留前290个元素，确保序列长度维度统一为290
+                language_model_outputs = language_model_outputs[:, :290, :]
+                # print("blip2_outputs.language_model_outputs attributes:", dir(language_model_outputs))         
+                # print("blip2_outputs.qformer_outputs.last_hidden_state.shape", blip2_outputs.qformer_outputs.last_hidden_state.shape) # [batch_size, seq_len, hidden_dim]
+                # print("blip2_outputs.language_model_outputs.hidden_state", language_model_outputs) # [batch_size, seq_len, hidden_dim]
+                # print(f"Batch {i} to {end_idx} - language_model_outputs shape: {language_model_outputs.shape}")
+                embeddings_list.append(language_model_outputs)
 
             except Exception as e:
                 print(f"Error processing batch {i} to {end_idx}: {e}")
@@ -292,6 +298,7 @@ class Model(nn.Module):
 
         # 4. 合并所有批次的嵌入
         embeddings = torch.cat(embeddings_list, dim=0)  # [B, seq_len, hidden_dim]
+        # print("After torch.cat, embeddings shape:", embeddings.shape) # torch.Size([32, 290, 2560])
 
         # 确保最终的 embeddings 形状正确
         #print(f"Embeddings shape: {embeddings.shape}")
@@ -304,7 +311,6 @@ class Model(nn.Module):
         llm_output_embedding = llm_output_embedding.to(torch.float32)  # 转换数据类型为torch.float32
         llm_output_embedding = self.sequence_projection(llm_output_embedding)  # [B, hidden_dim, pred_len]
         llm_output_embedding = llm_output_embedding.transpose(1, 2)  # [B, pred_len, hidden_dim]
-        #print("After projection shape:", llm_output_embedding.shape)  # 应该是 [B, pred_len, 768]
 
         # 6. 通过预测头进行预测
         predictions = self.predictor(llm_output_embedding)
