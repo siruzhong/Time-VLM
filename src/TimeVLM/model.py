@@ -40,6 +40,7 @@ class Model(nn.Module):
         self.seq_len = config.seq_len
         self.align_const = config.align_const
         self.description = config.content
+        self.dataset = config.data
 
         # Initialize the BLIP-2 processor and model for extracting image and text features
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
@@ -140,7 +141,7 @@ class Model(nn.Module):
         return prompts
 
     @staticmethod
-    def time_series_to_image(x_enc, context_len, periodicity=1, interpolation='bilinear'):
+    def time_series_to_image(x_enc, context_len, periodicity, interpolation='bilinear'):
         """
         Convert time series data into 3-channel image form for subsequent processing.
 
@@ -274,7 +275,13 @@ class Model(nn.Module):
         x_enc, means, stdev = Normalization(x_enc, 1)
 
         # 1. Convert time series data to images
-        images = self.time_series_to_image(x_enc, self.seq_len)
+        if self.dataset in ['ETTh1', 'ETTh2', 'ECL', "Traffic"]:
+            periodicity = 24
+        elif self.dataset in ['ETTm1', 'ETTm2']:
+            periodicity = 96
+        elif self.dataset in ['Weather']:
+            periodicity = 144
+        images = self.time_series_to_image(x_enc, self.seq_len, periodicity)
         np_images = images.cpu().numpy()
         for i in range(len(np_images)):
             np_images[i] = check_image_range(np_images[i])
