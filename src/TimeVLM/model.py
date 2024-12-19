@@ -110,15 +110,30 @@ class Model(nn.Module):
             lags_values_str = str(lags[b].tolist())
             trend_direction = "upward" if trends[b].mean() > 0 else "downward"  # Determine the overall trend direction using the mean of the trend
             
+            # prompt = (
+            #     f"<|start_prompt|>Dataset description: {description}"
+            #     f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information; "
+            #     "Input statistics: "
+            #     f"min value {min_values_str}, "
+            #     f"max value {max_values_str}, "
+            #     f"median value {median_values_str}, "
+            #     f"the trend of input is {trend_direction}, "
+            #     f"top {top_k} lags are : {lags_values_str}<|<end_prompt>|>"
+            # )
             prompt = (
-                f"<|start_prompt|>Dataset description: {description}"
-                f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information; "
-                "Input statistics: "
-                f"min value {min_values_str}, "
-                f"max value {max_values_str}, "
-                f"median value {median_values_str}, "
-                f"the trend of input is {trend_direction}, "
-                f"top {top_k} lags are : {lags_values_str}<|<end_prompt>|>"
+                f"<|start_prompt|>Dataset description: {description}. "
+                f"Forecast the next {pred_len} steps based on the previous {seq_len} steps. "
+                f"Statistical summary: Minimum value is {min_values_str}, maximum value is {max_values_str}, "
+                f"and the median value is {median_values_str}. The overall trend is {trend_direction}, "
+                f"with the most significant lags being: {lags_values_str}. "
+                f"The time series has been visualized using a composite image that combines "
+                f"direct 2D representation, Fourier transformation highlighting frequency components, "
+                f"and Wavelet transformation emphasizing time-frequency characteristics. "
+                f"This image uses color gradients to represent amplitude variations, with brighter colors "
+                f"indicating higher values. Patterns in the image such as stripes or clusters may indicate "
+                f"periodic features or anomalies in the data. "
+                f"These visual cues are crucial for identifying underlying trends and periodicity that are "
+                f"critical for accurate forecasting. <|end_prompt|>"
             )
             prompts.append(prompt)
         
@@ -370,6 +385,7 @@ def Normalization(x, norm_const=1.):
         torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)  # Calculate standard deviations and prevent division by zero [B, 1, nvars]
     stdev /= norm_const  # Adjust standard deviations
     x = x / stdev  
+    return x, means, stdev
 
 
 def Denormalization(y, means, std, padding=0):
