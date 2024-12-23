@@ -61,3 +61,12 @@ def print_args(args):
     p_hidden_dims_str = ', '.join(map(str, args.p_hidden_dims))
     print(f'  {"P Hidden Dims:":<20}{p_hidden_dims_str:<20}{"P Hidden Layers:":<20}{args.p_hidden_layers:<20}') 
     print()
+
+    print("\033[1m" + "Image Size Parameter" + "\033[0m")
+    print(f'  {"Image Size:":<20}{args.image_size:<20}')
+    print()
+
+    print("\033[1m" + "Predictor Hidden Dims" + "\033[0m")
+    predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
+    print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
+    print()

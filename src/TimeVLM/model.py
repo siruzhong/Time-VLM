@@ -59,11 +59,12 @@ class Model(nn.Module):
             nn.Linear(290, self.pred_len),
             nn.ReLU()
         )
+        predictor_hidden_dims = config.predictor_hidden_dims
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_size, 256),
+            nn.Linear(hidden_size, predictor_hidden_dims),
             nn.ReLU(),
             nn.Dropout(0.5),  # Add Dropout layer with a dropout probability of 0.5
-            nn.Linear(256, config.c_out)
+            nn.Linear(predictor_hidden_dims, config.c_out)
         )
 
 
