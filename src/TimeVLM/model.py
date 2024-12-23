@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 import sys
+from sympy import im
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,12 +41,17 @@ class Model(nn.Module):
         self.seq_len = config.seq_len
         self.align_const = config.align_const
         self.description = config.content
-        self.dataset = config.data
+        self.dataset = config.data_path.replace('.csv', '')
+        self.image_size = config.image_size
 
         # Initialize the BLIP-2 processor and model for extracting image and text features
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
         self.blip2_processor = Blip2Processor.from_pretrained(BLIP_ARCH)
         self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
+        
+        # Freeze the parameters of the BLIP-2 model so that the gradients are not updated during training.
+        for param in self.blip2_model.parameters():
+            param.requires_grad = False
         
         # MLP predictor to convert the multimodal embeddings output by BLIP-2 into final time series prediction results
         hidden_size = 2560 # self.blip2_model.config.text_config.hidden_size
@@ -54,10 +60,10 @@ class Model(nn.Module):
             nn.ReLU()
         )
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_size, config.c_out),
+            nn.Linear(hidden_size, 256),
             nn.ReLU(),
             nn.Dropout(0.5),  # Add Dropout layer with a dropout probability of 0.5
-            nn.Linear(config.c_out, config.c_out)
+            nn.Linear(256, config.c_out)
         )
 
 
@@ -103,6 +109,13 @@ class Model(nn.Module):
         lags = calculate_lags(x_enc, top_k)
         trends = x_enc.diff(dim=1).sum(dim=1)  # Calculate the overall trend
 
+        prompt_config = {
+            "dataset": True,
+            "task": True,
+            "statistics": True,
+            "image": True
+        }
+        
         prompts = []
         for b in range(x_enc.shape[0]):
             min_values_str = str(min_values[b].tolist()[0])
@@ -111,37 +124,18 @@ class Model(nn.Module):
             lags_values_str = str(lags[b].tolist())
             trend_direction = "upward" if trends[b].mean() > 0 else "downward"  # Determine the overall trend direction using the mean of the trend
             
-            # prompt = (
-            #     f"<|start_prompt|>Dataset description: {description}"
-            #     f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information; "
-            #     "Input statistics: "
-            #     f"min value {min_values_str}, "
-            #     f"max value {max_values_str}, "
-            #     f"median value {median_values_str}, "
-            #     f"the trend of input is {trend_direction}, "
-            #     f"top {top_k} lags are : {lags_values_str}<|<end_prompt>|>"
-            # )
-            prompt = (
-                f"<|start_prompt|>Dataset description: {description}. "
-                f"Forecast the next {pred_len} steps based on the previous {seq_len} steps. "
-                f"Statistical summary: Minimum value is {min_values_str}, maximum value is {max_values_str}, "
-                f"and the median value is {median_values_str}. The overall trend is {trend_direction}, "
-                f"with the most significant lags being: {lags_values_str}. "
-                f"The time series has been visualized using a composite image that combines "
-                f"direct 2D representation, Fourier transformation highlighting frequency components, "
-                f"and Wavelet transformation emphasizing time-frequency characteristics. "
-                f"This image uses color gradients to represent amplitude variations, with brighter colors "
-                f"indicating higher values. Patterns in the image such as stripes or clusters may indicate "
-                f"periodic features or anomalies in the data. "
-                f"These visual cues are crucial for identifying underlying trends and periodicity that are "
-                f"critical for accurate forecasting. <|end_prompt|>"
-            )
+            dataset_part = f"Dataset description: {description}." if prompt_config["dataset"] else ""
+            task_part = f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information." if prompt_config["task"] else ""
+            statistics_part = f"Input statistics: min value {min_values_str}, max value {max_values_str}, median value {median_values_str}, the trend of input is {trend_direction}, top {top_k} lags are : {lags_values_str}" if prompt_config["statistics"] else ""
+            image_part = f"The time series is visualized by an image showing 2D, Fourier, and Wavelet features, which helps analyze trends and periodicity for forecasting." if prompt_config["image"] else ""
+            prompt = f"<|start_prompt|>{dataset_part}{task_part}{statistics_part}{image_part}<|end_prompt|>"
+            
             prompts.append(prompt)
         
         return prompts
 
     @staticmethod
-    def time_series_to_image(x_enc, context_len, periodicity, interpolation='bilinear'):
+    def time_series_to_image(x_enc, image_size, context_len, periodicity, interpolation='bilinear'):
         """
         Convert time series data into 3-channel image form for subsequent processing.
 
@@ -155,9 +149,6 @@ class Model(nn.Module):
         Returns:
         - image_input (Tensor): The converted image with shape [batch_size, 3, image_size, image_size], which is 3-channel image data.
         """
-        
-        # Set the image size
-        image_size = 256  # Adjusted image size
 
         # Adjust padding (pad_left) for the time series based on periodicity
         pad_left = 0
@@ -275,13 +266,13 @@ class Model(nn.Module):
         x_enc, means, stdev = Normalization(x_enc, 1)
 
         # 1. Convert time series data to images
-        if self.dataset in ['ETTh1', 'ETTh2', 'ECL', "Traffic"]:
+        if self.dataset in ['ETTh1', 'ETTh2', 'electricity', "traffic"]:
             periodicity = 24
         elif self.dataset in ['ETTm1', 'ETTm2']:
             periodicity = 96
-        elif self.dataset in ['Weather']:
+        elif self.dataset in ['weather']:
             periodicity = 144
-        images = self.time_series_to_image(x_enc, self.seq_len, periodicity)
+        images = self.time_series_to_image(x_enc, self.image_size, self.seq_len, periodicity)
         np_images = images.cpu().numpy()
         for i in range(len(np_images)):
             np_images[i] = check_image_range(np_images[i])
