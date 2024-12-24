@@ -62,11 +62,12 @@ def print_args(args):
     print(f'  {"P Hidden Dims:":<20}{p_hidden_dims_str:<20}{"P Hidden Layers:":<20}{args.p_hidden_layers:<20}') 
     print()
 
-    print("\033[1m" + "Image Size Parameter" + "\033[0m")
+    print("\033[1m" + "Hyperparameters" + "\033[0m")
     print(f'  {"Image Size:":<20}{args.image_size:<20}')
-    print()
-
-    print("\033[1m" + "Predictor Hidden Dims" + "\033[0m")
     predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
     print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
+    print(f'  {"LLM Output Len:":<20}{args.llm_output_len:<20}')
+    print(f'  {"Periodicity:":<20}{args.periodicity:<20}')
+    print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
+    print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
     print()

@@ -20,22 +20,18 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TimeVLM')
 
     # basic config
-    parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast',
-                        help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
+    parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast', help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
     parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
     parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
-    parser.add_argument('--model', type=str, required=True, default='Autoformer',
-                        help='model name, options: [Autoformer, Transformer, TimesNet]')
+    parser.add_argument('--model', type=str, required=True, default='Autoformer', help='model name, options: [Autoformer, Transformer, TimesNet]')
 
     # data loader
     parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
     parser.add_argument('--root_path', type=str, default='./data/ETT/', help='root path of the data file')
     parser.add_argument('--data_path', type=str, default='ETTh1.csv', help='data file')
-    parser.add_argument('--features', type=str, default='M',
-                        help='forecasting task, options:[M, S, MS]; M:multivariate predict multivariate, S:univariate predict univariate, MS:multivariate predict univariate')
+    parser.add_argument('--features', type=str, default='M', help='forecasting task, options:[M, S, MS]; M:multivariate predict multivariate, S:univariate predict univariate, MS:multivariate predict univariate')
     parser.add_argument('--target', type=str, default='OT', help='target feature in S or MS task')
-    parser.add_argument('--freq', type=str, default='h',
-                        help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
+    parser.add_argument('--freq', type=str, default='h', help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
 
     # forecasting task
@@ -85,12 +81,18 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32, help='batch size of train input data')
     parser.add_argument('--patience', type=int, default=3, help='early stopping patience')
     parser.add_argument('--learning_rate', type=float, default=0.001, help='optimizer learning rate')
-    parser.add_argument('--des', type=str, default='test', help='exp description')
+    parser.add_argument('--des', type=str, default='Exp', help='exp description')
     parser.add_argument('--loss', type=str, default='MSE', help='loss function')
     parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
+    
+    # hyperparameters
     parser.add_argument('--image_size', type=int, default=224, help='image size for time series to image')
     parser.add_argument('--predictor_hidden_dims', type=int, default=16, help='hidden layer dimensions of predictor')
+    parser.add_argument('--llm_output_len', type=int, default=256, help='output length of the LLM in BLIP-2')
+    parser.add_argument('--periodicity', type=int, default=96)
+    parser.add_argument('--interpolation', type=str, default='bilinear')
+    parser.add_argument('--norm_const', type=float, default=0.4)
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
@@ -99,13 +101,11 @@ if __name__ == '__main__':
     parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids of multile gpus')
 
     # de-stationary projector params
-    parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128],
-                        help='hidden layer dimensions of projector (List)')
+    parser.add_argument('--p_hidden_dims', type=int, nargs='+', default=[128, 128], help='hidden layer dimensions of projector (List)')
     parser.add_argument('--p_hidden_layers', type=int, default=2, help='number of hidden layers in projector')
 
     # metrics (dtw)
-    parser.add_argument('--use_dtw', type=bool, default=False, 
-                        help='the controller of using dtw metric (dtw is time consuming, not suggested unless necessary)')
+    parser.add_argument('--use_dtw', type=bool, default=False, help='the controller of using dtw metric (dtw is time consuming, not suggested unless necessary)')
     
     # Augmentation
     parser.add_argument('--augmentation_ratio', type=int, default=0, help="How many times to augment")
@@ -135,26 +135,27 @@ if __name__ == '__main__':
     parser.add_argument('--llm_layers', type=int, default=2)
     parser.add_argument('--prompt_domain', type=int, default=0, help='')
 
-    parser.add_argument('--periodicity', type=int, default=96)
-    parser.add_argument('--interpolation', type=str, default='bilinear')
-    parser.add_argument('--norm_const', type=float, default=0.4)
-    parser.add_argument('--align_const', type=float, default=0.4)
-
     parser.add_argument('--wo_ts', type=int, default=0, help='without/with Time Series Data 1/0')
 
     args = parser.parse_args()
-    # args.use_gpu = True if torch.cuda.is_available() and args.use_gpu else False
     args.use_gpu = True if torch.cuda.is_available() else False
 
-    print(torch.cuda.is_available())
-
+    # set gpu id
     if args.use_gpu and args.use_multi_gpu:
         args.devices = args.devices.replace(' ', '')
         device_ids = args.devices.split(',')
         args.device_ids = [int(id_) for id_ in device_ids]
         args.gpu = args.device_ids[0]
 
-    
+    # set the preiodicity of the dataset
+    dataset = args.data_path.replace('.csv', '')
+    if dataset in ['ETTh1', 'ETTh2', 'electricity', "traffic"]:
+        args.periodicity = 24
+    elif dataset in ['ETTm1', 'ETTm2']:
+        periodicity = 96
+    elif dataset in ['weather']:
+        periodicity = 144
+
     args.content = load_content(args)
 
     print('Args in experiment:')

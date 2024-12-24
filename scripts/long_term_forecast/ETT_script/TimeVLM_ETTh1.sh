@@ -1,4 +1,6 @@
 model_name=TimeVLM
+gpu=0
+predictor_hidden_dims=128
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -19,7 +21,9 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --gpu $gpu \
+  --predictor_hidden_dims $predictor_hidden_dims
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -40,7 +44,9 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --gpu $gpu \
+  --predictor_hidden_dims $predictor_hidden_dims
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -61,7 +67,9 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --gpu $gpu \
+  --predictor_hidden_dims $predictor_hidden_dims
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -82,4 +90,6 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --gpu $gpu \
+  --predictor_hidden_dims $predictor_hidden_dims

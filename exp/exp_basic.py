@@ -1,5 +1,6 @@
 import os
 import torch
+from zmq import device
 from models import Autoformer, Transformer, TimesNet, Nonstationary_Transformer, DLinear, FEDformer, \
     Informer, LightTS, Reformer, ETSformer, Pyraformer, PatchTST, MICN, Crossformer, FiLM, iTransformer, \
     Koopa, TiDE, FreTS, TimeMixer, TSMixer, SegRNN, MambaSimple, TemporalFusionTransformer, SCINet, PAttn, TimeXer,TimeLLM,VisionTS
@@ -57,13 +58,19 @@ class Exp_Basic(object):
         
     def _log_model_parameters(self):
         """
-        打印模型的参数量。
+        打印模型参数。
         """
-        def count_parameters(model):
+        def count_learnable_parameters(model):
             return sum(p.numel() for p in model.parameters() if p.requires_grad)
+        
+        def count_total_parameters(model):
+            return sum(p.numel() for p in model.parameters())
 
-        total_params = count_parameters(self.model)
-        print(f"Model Parameters: {total_params:,}")
+        learable_params = count_learnable_parameters(self.model)
+        total_params = count_total_parameters(self.model)
+        print(f"Learnable model parameters: {learable_params:,}")
+        print(f"Total model parameters: {total_params:,}")
+        
 
     def _build_model(self):
         raise NotImplementedError
@@ -71,8 +78,6 @@ class Exp_Basic(object):
 
     def _acquire_device(self):
         if self.args.use_gpu:
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(
-                self.args.gpu) if not self.args.use_multi_gpu else self.args.devices
             device = torch.device('cuda:{}'.format(self.args.gpu))
             print('Use GPU: cuda:{}'.format(self.args.gpu))
         else:

@@ -39,10 +39,11 @@ class Model(nn.Module):
         self.task_name = config.task_name
         self.pred_len = config.pred_len
         self.seq_len = config.seq_len
-        self.align_const = config.align_const
         self.description = config.content
-        self.dataset = config.data_path.replace('.csv', '')
         self.image_size = config.image_size
+        self.periodicity = config.periodicity
+        self.llm_output_len = config.llm_output_len  # LLM output sequence length
+        self.predictor_hidden_dims = config.predictor_hidden_dims   # MLP predictor hidden layer dimensions
 
         # Initialize the BLIP-2 processor and model for extracting image and text features
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
@@ -56,15 +57,14 @@ class Model(nn.Module):
         # MLP predictor to convert the multimodal embeddings output by BLIP-2 into final time series prediction results
         hidden_size = 2560 # self.blip2_model.config.text_config.hidden_size
         self.sequence_projection = nn.Sequential(
-            nn.Linear(290, self.pred_len),
+            nn.Linear(self.llm_output_len, self.pred_len),
             nn.ReLU()
         )
-        predictor_hidden_dims = config.predictor_hidden_dims
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_size, predictor_hidden_dims),
+            nn.Linear(hidden_size, self.predictor_hidden_dims),
             nn.ReLU(),
             nn.Dropout(0.5),  # Add Dropout layer with a dropout probability of 0.5
-            nn.Linear(predictor_hidden_dims, config.c_out)
+            nn.Linear(self.predictor_hidden_dims, config.c_out)
         )
 
 
@@ -267,13 +267,7 @@ class Model(nn.Module):
         x_enc, means, stdev = Normalization(x_enc, 1)
 
         # 1. Convert time series data to images
-        if self.dataset in ['ETTh1', 'ETTh2', 'electricity', "traffic"]:
-            periodicity = 24
-        elif self.dataset in ['ETTm1', 'ETTm2']:
-            periodicity = 96
-        elif self.dataset in ['weather']:
-            periodicity = 144
-        images = self.time_series_to_image(x_enc, self.image_size, self.seq_len, periodicity)
+        images = self.time_series_to_image(x_enc, self.image_size, self.seq_len, self.periodicity)
         np_images = images.cpu().numpy()
         for i in range(len(np_images)):
             np_images[i] = check_image_range(np_images[i])
@@ -290,7 +284,7 @@ class Model(nn.Module):
 
         # 3. Use BLIP-2's processor and model to extract embeddings
         hidden_dim = 2560  # BLIP-2's default hidden layer dimension
-        seq_len = 290  # LLM output sequence length
+        seq_len = self.llm_output_len  # LLM output sequence length
         batch_size = 32  # Adjust according to memory situation
         embeddings_list = []  # Store embeddings for each batch
 
@@ -314,8 +308,12 @@ class Model(nn.Module):
 
                 # Extract the output of language_model_outputs as embeddings
                 language_model_outputs = blip2_outputs.language_model_outputs.hidden_states[-1]
-                # Truncate to keep only the first 290 elements to ensure a unified sequence length dimension of 290 (Possible change)
-                language_model_outputs = language_model_outputs[:, :290, :]
+                # Truncate to keep only the first llm_output_len elements to ensure a unified sequence length dimension (Possible change)
+                if language_model_outputs.shape[1] > self.llm_output_len:
+                    language_model_outputs = language_model_outputs[:, :self.llm_output_len, :]
+                elif language_model_outputs.shape[1] < self.llm_output_len:
+                    repeat_times = -(-self.llm_output_len // language_model_outputs.shape[1])
+                    language_model_outputs = language_model_outputs.repeat(1, repeat_times, 1)[:, :self.llm_output_len, :]
                 embeddings_list.append(language_model_outputs)
 
             except Exception as e:
