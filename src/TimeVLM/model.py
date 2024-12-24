@@ -44,6 +44,7 @@ class Model(nn.Module):
         self.periodicity = config.periodicity
         self.llm_output_len = config.llm_output_len  # LLM output sequence length
         self.predictor_hidden_dims = config.predictor_hidden_dims   # MLP predictor hidden layer dimensions
+        self.blip2_hidden_size = 2560   # BLIP-2 hidden size
 
         # Initialize the BLIP-2 processor and model for extracting image and text features
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
@@ -55,13 +56,12 @@ class Model(nn.Module):
             param.requires_grad = False
         
         # MLP predictor to convert the multimodal embeddings output by BLIP-2 into final time series prediction results
-        hidden_size = 2560 # self.blip2_model.config.text_config.hidden_size
         self.sequence_projection = nn.Sequential(
             nn.Linear(self.llm_output_len, self.pred_len),
             nn.ReLU()
         )
         self.predictor = nn.Sequential(
-            nn.Linear(hidden_size, self.predictor_hidden_dims),
+            nn.Linear(self.blip2_hidden_size, self.predictor_hidden_dims),
             nn.ReLU(),
             nn.Dropout(0.5),  # Add Dropout layer with a dropout probability of 0.5
             nn.Linear(self.predictor_hidden_dims, config.c_out)
@@ -283,16 +283,15 @@ class Model(nn.Module):
             prompts = prompts[:B] if len(prompts) > B else prompts + [prompts[-1]] * (B - len(prompts))
 
         # 3. Use BLIP-2's processor and model to extract embeddings
-        hidden_dim = 2560  # BLIP-2's default hidden layer dimension
         seq_len = self.llm_output_len  # LLM output sequence length
         batch_size = 32  # Adjust according to memory situation
         embeddings_list = []  # Store embeddings for each batch
 
+        # if B = 32, will only run once
         for i in range(0, B, batch_size):
             end_idx = min(i + batch_size, B)
             batch_images = images[i:end_idx]
             batch_prompts = prompts[i:end_idx]
-            # print(f"Processing batch {i} to {end_idx} - Images shape: {batch_images.shape}, Prompts length: {len(batch_prompts)}")
 
             try:
                 # Encode using the processor
@@ -323,7 +322,7 @@ class Model(nn.Module):
 
                 # Use zero padding if processing fails
                 embeddings_list.append(torch.zeros(
-                    end_idx - i, seq_len, hidden_dim, 
+                    end_idx - i, seq_len, self.blip2_hidden_size, 
                     device=device, 
                     dtype=torch.float16
                 ))
@@ -345,7 +344,7 @@ class Model(nn.Module):
         embeddings = torch.cat(embeddings_list, dim=0)  # [B, seq_len, hidden_dim] => [32, 290, 2560]
 
         # Ensure the final embeddings have the correct shape
-        assert embeddings.shape == (B, seq_len, hidden_dim), f"Expected shape {(B, seq_len, hidden_dim)}, got {embeddings.shape}"
+        assert embeddings.shape == (B, seq_len, self.blip2_hidden_size), f"Expected shape {(B, seq_len, self.blip2_hidden_size)}, got {embeddings.shape}"
 
         # 5. Project sequence length
         llm_output_embedding = embeddings.transpose(1, 2)  # [B, hidden_dim, seq_len]

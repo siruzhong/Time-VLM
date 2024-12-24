@@ -152,9 +152,9 @@ if __name__ == '__main__':
     if dataset in ['ETTh1', 'ETTh2', 'electricity', "traffic"]:
         args.periodicity = 24
     elif dataset in ['ETTm1', 'ETTm2']:
-        periodicity = 96
+        args.periodicity = 96
     elif dataset in ['weather']:
-        periodicity = 144
+        args.periodicity = 144
 
     args.content = load_content(args)
 
