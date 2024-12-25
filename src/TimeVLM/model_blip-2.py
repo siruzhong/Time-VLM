@@ -1,6 +1,4 @@
 import os
-from pydoc import text
-from urllib.request import OpenerDirector
 import pandas as pd
 import numpy as np
 import sys
@@ -9,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import inspect
-from transformers import CLIPProcessor, CLIPModel
+from transformers import Blip2Processor, Blip2Model
 from PIL import Image
 import pywt
 import einops
@@ -24,12 +22,12 @@ from transformers.models.vilt import *
 
 class Model(nn.Module):
     """
-    Time series prediction model based on CLIP.
-    It processes image and text modalities following a modified process for multimodal fusion and time series prediction.
+    Time series prediction model based on BLIP-2.
+    It processes image and text modalities following the BLIP-2 standard process for multimodal fusion and time series prediction.
 
     Functions:
     - Convert input time series data into images and text prompts.
-    - Utilize CLIP's Image Encoder and Text Encoder to process images and text sequentially to obtain multimodal embeddings.
+    - Utilize BLIP-2's Image Encoder, Q-Former, and LLM to process images and text sequentially to obtain multimodal embeddings.
     - Output prediction results through an MLP predictor based on the multimodal embeddings.
 
     Args:
@@ -44,28 +42,28 @@ class Model(nn.Module):
         self.description = config.content
         self.image_size = config.image_size
         self.periodicity = config.periodicity
-        self.clip_fusion_len =  24  # CLIP fusion hidden layer dimensions
+        self.llm_output_len = config.llm_output_len  # LLM output sequence length
         self.predictor_hidden_dims = config.predictor_hidden_dims   # MLP predictor hidden layer dimensions
-        self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32, adjust as per actual used model)
+        self.blip2_hidden_size = 2560   # BLIP-2 hidden size
 
-        # Initialize the CLIP processor and model for extracting image and text features
-        CLIP_ARCH = 'openai/clip-vit-base-patch32'  # Change to the specific CLIP architecture you want to use
-        self.clip_processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
-        self.clip_model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
+        # Initialize the BLIP-2 processor and model for extracting image and text features
+        BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
+        self.blip2_processor = Blip2Processor.from_pretrained(BLIP_ARCH)
+        self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
         
-        # Freeze the parameters of the CLIP model so that the gradients are not updated during training.
-        for param in self.clip_model.parameters():
+        # Freeze the parameters of the BLIP-2 model so that the gradients are not updated during training.
+        for param in self.blip2_model.parameters():
             param.requires_grad = False
         
-        # MLP predictor to convert the multimodal embeddings output by CLIP into final time series prediction results
+        # MLP predictor to convert the multimodal embeddings output by BLIP-2 into final time series prediction results
         self.sequence_projection = nn.Sequential(
-            nn.Linear(self.clip_fusion_len, self.pred_len),
+            nn.Linear(self.llm_output_len, self.pred_len),
             nn.ReLU()
         )
         self.predictor = nn.Sequential(
-            nn.Linear(self.clip_hidden_size, self.predictor_hidden_dims),  # 将输入维度修改为96，与当前输入特征维度匹配
+            nn.Linear(self.blip2_hidden_size, self.predictor_hidden_dims),
             nn.ReLU(),
-            nn.Dropout(0.5),  
+            nn.Dropout(0.5),  # Add Dropout layer with a dropout probability of 0.5
             nn.Linear(self.predictor_hidden_dims, config.c_out)
         )
 
@@ -133,12 +131,6 @@ class Model(nn.Module):
             image_part = f"The time series is visualized by an image showing 2D, Fourier, and Wavelet features, which helps analyze trends and periodicity for forecasting." if prompt_config["image"] else ""
             prompt = f"<|start_prompt|>{dataset_part}{task_part}{statistics_part}{image_part}<|end_prompt|>"
             
-            # 进行截断或填充操作
-            if len(prompt) > 77:
-                prompt = prompt[:77]  # 截断
-            elif len(prompt) < 77:
-                prompt = prompt + " " * (77 - len(prompt))  # 填充空格使其长度达到要求
-        
             prompts.append(prompt)
         
         return prompts
@@ -256,7 +248,7 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
         """
-        Forward propagation to process the input time series data, perform multimodal feature extraction and fusion following a CLIP-based process, and output prediction results.
+        Forward propagation to process the input time series data, perform multimodal feature extraction and fusion following the BLIP-2 process, and output prediction results.
 
         Args:
         - x_enc: Input time series data with shape [B, L, D].
@@ -287,49 +279,84 @@ class Model(nn.Module):
         # Ensure prompts is a list and has the correct length
         if not isinstance(prompts, list):
             prompts = prompts.tolist()
-        if len(prompts)!= B:
+        if len(prompts) != B:
             prompts = prompts[:B] if len(prompts) > B else prompts + [prompts[-1]] * (B - len(prompts))
 
-        # 3. Use CLIP's processor and model to extract embeddings
-        try:
-            encoding = self.clip_processor(
-                images=images, 
-                text=prompts,
-                return_tensors="pt", 
-                padding=True
-            ).to(device)
+        # 3. Use BLIP-2's processor and model to extract embeddings
+        seq_len = self.llm_output_len  # LLM output sequence length
+        batch_size = 32  # Adjust according to memory situation
+        embeddings_list = []  # Store embeddings for each batch
 
-            with torch.no_grad():
-                clip_outputs = self.clip_model(**encoding)
-                text_embedding = clip_outputs.text_embeds
-                image_embedding = clip_outputs.image_embeds
+        # if B = 32, will only run once
+        for i in range(0, B, batch_size):
+            end_idx = min(i + batch_size, B)
+            batch_images = images[i:end_idx]
+            batch_prompts = prompts[i:end_idx]
 
-        except Exception as e:
-            print(f"Error processing data: {e}")
-            print(f"Images shape: {images.shape}")
-            print(f"Prompts: {prompts}")
-            raise e
+            try:
+                # Encode using the processor
+                encoding = self.blip2_processor(
+                    images=batch_images, 
+                    text=batch_prompts,
+                    return_tensors="pt", 
+                    padding=True
+                ).to(device, torch.float16)
 
-        # 4. Perform multimodal fusion
-        image_embedding = image_embedding.view(B, image_embedding.shape[0] // B, image_embedding.shape[-1])  # Reshape to [B, num_patches, 512]
-        text_embedding = text_embedding.view(B, text_embedding.shape[0] // B, text_embedding.shape[-1])  # Reshape to [B, num_patches, 512]
-        fused_embedding = torch.cat([text_embedding, image_embedding], dim=1)
-        fusion_len = fused_embedding.shape[1]
+                with torch.no_grad():
+                    blip2_outputs = self.blip2_model(**encoding, output_hidden_states=True) # blip2_model.keys() — odict_keys(['logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
+
+                # Extract the output of language_model_outputs as embeddings
+                language_model_outputs = blip2_outputs.language_model_outputs.hidden_states[-1]
+                # Truncate to keep only the first llm_output_len elements to ensure a unified sequence length dimension (Possible change)
+                if language_model_outputs.shape[1] > self.llm_output_len:
+                    language_model_outputs = language_model_outputs[:, :self.llm_output_len, :]
+                elif language_model_outputs.shape[1] < self.llm_output_len:
+                    repeat_times = -(-self.llm_output_len // language_model_outputs.shape[1])
+                    language_model_outputs = language_model_outputs.repeat(1, repeat_times, 1)[:, :self.llm_output_len, :]
+                embeddings_list.append(language_model_outputs)
+
+            except Exception as e:
+                print(f"Error processing batch {i} to {end_idx}: {e}")
+                print(f"Batch images shape: {batch_images.shape}")
+                print(f"Batch prompts: {batch_prompts}")
+
+                # Use zero padding if processing fails
+                embeddings_list.append(torch.zeros(
+                    end_idx - i, seq_len, self.blip2_hidden_size, 
+                    device=device, 
+                    dtype=torch.float16
+                ))
+
+            # Release memory
+            if 'encoding' in locals():
+                del encoding
+            if 'blip2_outputs' in locals():
+                del blip2_outputs
+            if 'qformer_outputs' in locals():
+                del qformer_outputs
+            torch.cuda.empty_cache()
+
+        # Check if embeddings_list is empty
+        if not embeddings_list:
+            raise ValueError("No embeddings were generated. Check your input data and batch sizes.")
+
+        # 4. 合并所有批次的嵌入
+        embeddings = torch.cat(embeddings_list, dim=0)  # [B, seq_len, hidden_dim] => [32, 290, 2560]
+
+        # Ensure the final embeddings have the correct shape
+        assert embeddings.shape == (B, seq_len, self.blip2_hidden_size), f"Expected shape {(B, seq_len, self.blip2_hidden_size)}, got {embeddings.shape}"
+
+        # 5. Project sequence length
+        llm_output_embedding = embeddings.transpose(1, 2)  # [B, hidden_dim, seq_len]
+        llm_output_embedding = llm_output_embedding.to(torch.float32)  # Convert data type to torch.float32
+        llm_output_embedding = self.sequence_projection(llm_output_embedding)  # [B, hidden_dim, pred_len]
+        llm_output_embedding = llm_output_embedding.transpose(1, 2)  # [B, pred_len, hidden_dim]
+
+        # 6. Make predictions through the predictor head
+        predictions = self.predictor(llm_output_embedding)
+        predictions = predictions.view(B, self.pred_len, -1)  # [B, pred_len, c_out]
         
-        if self.clip_fusion_len != fusion_len:
-            self.clip_fusion_len = fusion_len
-            self.sequence_projection = nn.Linear(self.clip_fusion_len, self.pred_len).to(fused_embedding.device)
-    
-        # 5. Sequence projection
-        fused_embedding = fused_embedding.transpose(1, 2)  # [B, hidden_dim, seq_len]
-        fused_embedding = self.sequence_projection(fused_embedding)
-        fused_embedding = fused_embedding.transpose(1, 2)  # [B, seq_len, hidden_dim]
-
-        # 6. Prediction
-        predictions = self.predictor(fused_embedding)   # [32, 96, 21]
-        predictions = predictions.view(B, self.pred_len, -1)
-        
-        # 7. Denormalize the prediction results
+        # 7. Denormalization
         y = Denormalization(predictions, means, stdev, self.config.pred_len)
 
         return y
