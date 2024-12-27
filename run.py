@@ -93,6 +93,8 @@ if __name__ == '__main__':
     parser.add_argument('--periodicity', type=int, default=96)
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
+    parser.add_argument('--three_channel_image', type=bool, default=True, help='use three channel image')
+    parser.add_argument('--finetune_clip', type=bool, default=False, help='finetune clip model')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
@@ -160,6 +162,17 @@ if __name__ == '__main__':
 
     print('Args in experiment:')
     print_args(args)
+    
+    print("\033[1m" + "Hyperparameters" + "\033[0m")
+    print(f'  {"Image Size:":<20}{args.image_size:<20}')
+    predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
+    print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
+    print(f'  {"Periodicity:":<20}{args.periodicity:<20}')
+    print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
+    print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
+    print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
+    print(f'  {"Finetune Clip:":<20}{args.finetune_clip:<20}')
+    print()
 
     if args.task_name == 'long_term_forecast':
         Exp = Exp_Long_Term_Forecast

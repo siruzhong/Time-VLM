@@ -1,39 +1,30 @@
 import os
-from pydoc import text
-from urllib.request import OpenerDirector
-import pandas as pd
-import numpy as np
 import sys
-from sympy import im
+import gc
+from typing import List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import inspect
-from transformers import CLIPProcessor, CLIPModel
-from PIL import Image
-import pywt
 import einops
-from math import sqrt
+from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
 from torchvision.transforms import Resize
+from pytorch_wavelets import DWTForward
+import kornia.augmentation as K
 
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from layers.Embed import PatchEmbedding
 from layers.models_mae import *
+from layers.SelfAttention_Family import FullAttention, AttentionLayer
 from transformers.models.vilt import *
 
 class Model(nn.Module):
     """
-    Time series prediction model based on CLIP.
-    It processes image and text modalities following a modified process for multimodal fusion and time series prediction.
-
-    Functions:
-    - Convert input time series data into images and text prompts.
-    - Utilize CLIP's Image Encoder and Text Encoder to process images and text sequentially to obtain multimodal embeddings.
-    - Output prediction results through an MLP predictor based on the multimodal embeddings.
-
-    Args:
-    - config: A configuration object containing various parameters related to the task (such as sequence length, prediction length, etc.).
+    Multimodal Time Series Prediction Model based on CLIP.
+    Processes image and text modalities for multimodal fusion and time series prediction.
     """
     def __init__(self, config, **kwargs):
         super(Model, self).__init__()
@@ -42,36 +33,74 @@ class Model(nn.Module):
         self.pred_len = config.pred_len
         self.seq_len = config.seq_len
         self.description = config.content
+        self.three_channel_image = config.three_channel_image
+        self.finetune_clip = config.finetune_clip
         self.image_size = config.image_size
+        self.save_images_flag = False  # Set to True to save generated images
+        self.detail_prompt = False  # Set to True to include dataset description in the prompt
+        self.norm_const = config.norm_const
         self.periodicity = config.periodicity
-        self.clip_fusion_len =  24  # CLIP fusion hidden layer dimensions
-        self.predictor_hidden_dims = config.predictor_hidden_dims   # MLP predictor hidden layer dimensions
-        self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32, adjust as per actual used model)
+        self.clip_fusion_len = config.c_out + 2  # CLIP fusion hidden layer dimensions
+        self.predictor_hidden_dims = config.predictor_hidden_dims  # MLP predictor hidden layer dimensions
+        self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32)
 
-        # Initialize the CLIP processor and model for extracting image and text features
-        CLIP_ARCH = 'openai/clip-vit-base-patch32'  # Change to the specific CLIP architecture you want to use
+        # Initialize image resizing using Kornia
+        self.resize = K.Resize((self.image_size, self.image_size), resample='BILINEAR')
+
+        # Initialize wavelet transform
+        self.dwt = DWTForward(J=1, wave='haar')
+
+        # Initialize CLIP processor and model
+        CLIP_ARCH = 'openai/clip-vit-base-patch32'
         self.clip_processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
         self.clip_model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
-        
-        # Freeze the parameters of the CLIP model so that the gradients are not updated during training.
-        for param in self.clip_model.parameters():
-            param.requires_grad = False
-        
-        # MLP predictor to convert the multimodal embeddings output by CLIP into final time series prediction results
-        self.sequence_projection = nn.Sequential(
-            nn.Linear(self.clip_fusion_len, self.pred_len),
-            nn.ReLU()
+
+        # Freeze CLIP model parameters
+        self._set_requires_grad(self.clip_model, False)
+        if self.finetune_clip:
+            # Unfreeze the last layers of CLIP's vision and text encoders
+            self._set_requires_grad(self.clip_model.vision_model.encoder.layers[-1], True)
+            self._set_requires_grad(self.clip_model.text_model.encoder.layers[-1], True)
+
+        # Print the total number of learnable parameters in CLIP
+        learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
+        print(f"CLIP Learnable model parameters: {learnable_params}")
+
+        # Initialize TemporalProjection module
+        # self.sequence_projection = nn.Sequential(
+        #     nn.Linear(self.clip_fusion_len, self.pred_len),
+        #     nn.ReLU()
+        # )
+        self.sequence_projection = TemporalProjection(
+            fusion_dim=self.clip_fusion_len,
+            d_model=self.clip_hidden_size,
+            pred_len=self.pred_len,
+            dropout=config.dropout
         )
+
+        # Initialize MLP predictor
         self.predictor = nn.Sequential(
-            nn.Linear(self.clip_hidden_size, self.predictor_hidden_dims),  # 将输入维度修改为96，与当前输入特征维度匹配
+            nn.Linear(self.clip_hidden_size, self.predictor_hidden_dims),
             nn.ReLU(),
-            nn.Dropout(0.5),  
+            nn.Dropout(0.1),
             nn.Linear(self.predictor_hidden_dims, config.c_out)
         )
 
-
     @staticmethod
-    def generate_time_series_prompt(x_enc, description, pred_len, seq_len, top_k=5):
+    def _set_requires_grad(model: nn.Module, value: bool):
+        """
+        Recursively set requires_grad for all parameters in a model.
+
+        Args:
+            model (nn.Module): The model or submodule.
+            value (bool): Whether to set requires_grad.
+        """
+        for param in model.parameters():
+            param.requires_grad = value
+        for child in model.children():
+            Model._set_requires_grad(child, value)
+            
+    def generate_time_series_prompt(self, x_enc, description, pred_len, seq_len, top_k=5):
         """
         Generate text prompts for the language model based on time series data.
 
@@ -105,137 +134,130 @@ class Model(nn.Module):
 
             return lags
         
-        # Calculate input statistics
+        # Calculate statistics
         min_values = torch.min(x_enc, dim=1)[0]
         max_values = torch.max(x_enc, dim=1)[0]
-        medians = torch.median(x_enc, dim=1).values
         lags = calculate_lags(x_enc, top_k)
         trends = x_enc.diff(dim=1).sum(dim=1)  # Calculate the overall trend
 
-        prompt_config = {
-            "dataset": True,
-            "task": True,
-            "statistics": True,
-            "image": True
-        }
-        
         prompts = []
         for b in range(x_enc.shape[0]):
             min_values_str = str(min_values[b].tolist()[0])
             max_values_str = str(max_values[b].tolist()[0])
-            median_values_str = str(medians[b].tolist()[0])
             lags_values_str = str(lags[b].tolist())
             trend_direction = "upward" if trends[b].mean() > 0 else "downward"  # Determine the overall trend direction using the mean of the trend
             
-            dataset_part = f"Dataset description: {description}." if prompt_config["dataset"] else ""
-            task_part = f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information." if prompt_config["task"] else ""
-            statistics_part = f"Input statistics: min value {min_values_str}, max value {max_values_str}, median value {median_values_str}, the trend of input is {trend_direction}, top {top_k} lags are : {lags_values_str}" if prompt_config["statistics"] else ""
-            image_part = f"The time series is visualized by an image showing 2D, Fourier, and Wavelet features, which helps analyze trends and periodicity for forecasting." if prompt_config["image"] else ""
-            prompt = f"<|start_prompt|>{dataset_part}{task_part}{statistics_part}{image_part}<|end_prompt|>"
+            image_part = f"{seq_len}-time-step img, predict {pred_len} steps."
+            image_part = image_part[:77] if len(image_part) > 77 else image_part
+            stats_part = (f"Stats: range={float(min_values_str):.6f}~{float(max_values_str):.6f}, trend={trend_direction}, lags={lags_values_str}.")
+            stats_part = stats_part[:77] if len(stats_part) > 77 else stats_part
             
-            # 进行截断或填充操作
-            if len(prompt) > 77:
-                prompt = prompt[:77]  # 截断
-            elif len(prompt) < 77:
-                prompt = prompt + " " * (77 - len(prompt))  # 填充空格使其长度达到要求
-        
-            prompts.append(prompt)
-        
+            if self.detail_prompt:
+                dataset_part = f"Dataset: {description}."
+                prompts.append([dataset_part, image_part, stats_part])
+            else:
+                prompts.append([image_part, stats_part])
+
         return prompts
 
-    @staticmethod
-    def time_series_to_image(x_enc, image_size, context_len, periodicity, interpolation='bilinear'):
+    def time_series_to_image(self, x_enc, context_len, periodicity):
         """
-        Convert time series data into 3-channel image form for subsequent processing.
+        Convert time series data into 3-channel image tensors.
 
         Args:
-        - x_enc (Tensor): Input time series data with shape [batch_size, context_len, nvars], where
-                    batch_size is the batch size, context_len is the length of the time series, and nvars is the number of features at each time step.
-        - context_len (int): The context length of the time series, used to determine the number of time steps to process.
-        - periodicity (int): The periodicity of each time step, default is 1, meaning one feature is processed at each time step.
-        - interpolation (str): Interpolation method used for resizing the image. Optional values are 'bilinear', 'nearest', 'bicubic'.
+            x_enc (torch.Tensor): Input time series data of shape [B, context_len, nvars].
+            context_len (int): Context length of the time series.
+            periodicity (int): Periodicity for segmenting the time series.
 
         Returns:
-        - image_input (Tensor): The converted image with shape [batch_size, 3, image_size, image_size], which is 3-channel image data.
+            torch.Tensor: Image tensors of shape [B * nvars, 3, image_size, image_size].
         """
 
-        # Adjust padding (pad_left) for the time series based on periodicity
+        # Adjust padding to make context_len a multiple of periodicity
         pad_left = 0
         if context_len % periodicity!= 0:
-            pad_left = periodicity - context_len % periodicity  # Ensure the time series length is a multiple of the periodicity
+            pad_left = periodicity - context_len % periodicity
 
-        # Define interpolation methods
-        interpolation_methods = {
-            "bilinear": Image.BILINEAR,
-            "nearest": Image.NEAREST,
-            "bicubic": Image.BICUBIC,
-        }
-        interpolation = interpolation_methods.get(interpolation, Image.BILINEAR)
+        # Rearrange to [B, nvars, seq_len]
+        x_enc = einops.rearrange(x_enc, 'b s n -> b n s')
 
-        def safe_resize(size, interpolation):
-            """
-            Safely resize the image, compatible with differences in PIL and torchvision versions.
-
-            Args:
-            - size (tuple): The resized image size.
-            - interpolation (str): The interpolation method.
-
-            Returns:
-            - Resize instance: A torchvision.transforms.Resize instance for resizing the image.
-            """
-            signature = inspect.signature(Resize)
-            params = signature.parameters
-            if 'antialias' in params:
-                return Resize(size, interpolation, antialias=False)
-            else:
-                return Resize(size, interpolation)
+        # Pad the time series
+        x_pad = F.pad(x_enc, (pad_left, 0), mode='replicate')
         
-        input_resize = safe_resize((image_size, image_size), interpolation=interpolation)        
+        # Reshape to [B * nvars, 1, f, p]
+        x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=periodicity)
         
-        # Rearrange the input data to the format [batch_size, nvars, seq_len]
-        x_enc = einops.rearrange(x_enc, 'b s n -> b n s')  # [batch_size, nvars, seq_len]
+        # Resize the time series data
+        x_resized_2d = self.resize(x_2d)  # Shape: [B * nvars, 1, image_size, image_size]
 
-        # Pad the time series and process it in segments based on periodicity
-        x_pad = F.pad(x_enc, (pad_left, 0), mode='replicate')  # Padding
-        x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=periodicity)  # [batch_size, nvars, seq_len]
-
-        # Apply Fourier transform or wavelet transform
-        def apply_fourier_transform(x_2d):
-            """
-            Apply Fourier transform to the input 2D time series data.
-            """
-            x_fft = torch.fft.fft(x_2d, dim=-1)
-            x_fft_abs = torch.abs(x_fft)  # Take the magnitude part of the Fourier transform
-            return x_fft_abs
-
-        def apply_wavelet_transform(x_2d):
-            """
-            Apply wavelet transform to the input 2D time series data.
-            """
-            coeffs = []
-            for i in range(x_2d.shape[0]):  # Process each batch
-                for j in range(x_2d.shape[1]):  # Process each channel (feature)
-                    cA, cD = pywt.dwt(x_2d[i, j].cpu().numpy(), 'haar')  # Haar wavelet transform
-                    coeffs.append(np.concatenate([cA, cD]))  # Merge detail coefficients and approximation coefficients
-            coeffs = np.stack(coeffs, axis=0)
-            wavelet_result = torch.from_numpy(coeffs).to(x_2d.device)
-            return wavelet_result.unsqueeze(1)  # Change to [batch_size, 1, height, width]
+        # Convert to 3-channel image
+        if self.three_channel_image:
+            # Apply Fourier transform or wavelet transform
+            x_fft = self._apply_fourier_transform(x_2d)
+            x_wavelet = self._apply_wavelet_transform(x_2d)
+            # Resize the Fourier or wavelet transformed data as image input using interpolation
+            x_resized_fft = self.resize(x_fft)  # [b*n, 1, image_size, image_size]
+            x_resized_wavelet = self.resize(x_wavelet)  # [b*n, 1, image_size, image_size]
+            # Concatenate along the channel dimension to form a 3-channel image
+            images = torch.concat([x_resized_2d, x_resized_fft, x_resized_wavelet], dim=1)  # [b*n, 3, h, w]
+        else:
+            # Repeat the single channel to create a 3-channel image
+            images = einops.repeat(x_resized_2d, 'b 1 h w -> b c h w', c=3)
         
-        # Select Fourier transform or wavelet transform
-        x_2d_fourier = apply_fourier_transform(x_2d)
-        x_2d_wavelet = apply_wavelet_transform(x_2d)
+        # Normalize images to [0, 255] as uint8
+        images = self._normalize_images(images)
+        
+        # Optionally save images
+        if self.save_images_flag:
+            self.save_images(images)
 
-        # Resize the Fourier or wavelet transformed data as image input using interpolation
-        x_resized_2d = input_resize(x_2d) # [224, 1, 256, 256]
-        x_resized_fourier = input_resize(x_2d_fourier)  # [224, 1, 256, 256]
-        x_resized_wavelet = input_resize(x_2d_wavelet)  # [224, 1, 256, 256]
+        return images
+    
+    def _apply_fourier_transform(self, x_2d):
+        """
+        Apply Fourier transform to the input 2D time series data.
+        """
+        x_fft = torch.fft.fft(x_2d, dim=-1)
+        x_fft_abs = torch.abs(x_fft)  # Take the magnitude part of the Fourier transform
+        return x_fft_abs
 
-        # Repeat the resized image data to match the number of channels
-        # image_input = einops.repeat(x_resized_2d, 'b 1 h w -> b c h w', c=3)
-        # Extend the number of channels of the image to 3 to fit the image format
-        image_input = torch.concat([x_resized_2d, x_resized_fourier, x_resized_wavelet], dim=1)  # [batch_size, 3, h, w]
-
-        return image_input
+    def _apply_wavelet_transform(self, x_2d):
+        """
+        Apply wavelet transform to the input 2D time series data.
+        """
+        # cA: Low-frequency components, cD: High-frequency components
+        cA, cD = self.dwt(x_2d)  # [224, 1, 12, 2], [224, 1, 3, 12, 2]
+        cD_reshaped = cD[0].squeeze(1)  # [224, 3, 12, 2]
+        # Concatenate low-frequency and high-frequency components
+        wavelet_result = torch.cat([cA, cD_reshaped], dim=1)  # [224, 4, 12, 2]
+        # Average across the channel dimension to reduce to 1 channel
+        wavelet_result = wavelet_result.mean(dim=1, keepdim=True)  # [224, 1, 12, 2]
+        return wavelet_result
+    
+    @staticmethod
+    def _normalize_images(images):
+        """
+        Normalize image tensors to [0, 255] as uint8.
+        Assumes images are in [0, 1] or need to be scaled.
+        
+        Args:
+        - images (Tensor): Input images with shape [B, C, H, W]
+        
+        Returns:
+        - Tensor: Normalized images as uint8 with shape [B, C, H, W]
+        """
+        # Compute min and max per image across all channels and spatial dimensions
+        min_vals = images.view(images.size(0), -1).min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+        max_vals = images.view(images.size(0), -1).max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+        # Avoid division by zero by adding a small epsilon
+        epsilon = 1e-5
+        scale = (max_vals - min_vals).clamp(min=epsilon)
+        # Normalize to [0, 1]
+        images = (images - min_vals) / scale
+        # Scale to [0, 255] and clamp to ensure valid range
+        images = (images * 255).clamp(0, 255).to(torch.uint8)
+        
+        return images
 
     @torch.no_grad()
     def save_images(self, images, batch_idx):
@@ -256,53 +278,52 @@ class Model(nn.Module):
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
         """
-        Forward propagation to process the input time series data, perform multimodal feature extraction and fusion following a CLIP-based process, and output prediction results.
+        Forward pass of the model.
 
         Args:
         - x_enc: Input time series data with shape [B, L, D].
-        - x_mark_enc: Time stamps (optional).
-        - x_dec: Decoded input time series data (optional).
-        - x_mark_dec: Decoded time stamps (optional).
-        - mask: Mask (optional).
 
         Returns:
-        - y: Model prediction results with shape [B, pred_len, c_out].
+        - torch.Tensor: Prediction results of shape [B, pred_len, c_out].
         """
         B, L, D = x_enc.shape
         device = x_enc.device
 
         # Normalize the input data
-        x_enc, means, stdev = Normalization(x_enc, 1)
+        x_enc, means, stdev = self._normalize_input(x_enc)
 
         # 1. Convert time series data to images
-        images = self.time_series_to_image(x_enc, self.image_size, self.seq_len, self.periodicity)
-        np_images = images.cpu().numpy()
-        for i in range(len(np_images)):
-            np_images[i] = check_image_range(np_images[i])
-        images = torch.from_numpy(np_images).to(device)  # 再转换回torch.Tensor并放回GPU（如果需要）
-        self.save_images(images, batch_idx=B)
+        images = self.time_series_to_image(x_enc, self.seq_len, self.periodicity)  # Shape: [B * nvars, 3, H, W]
 
         # 2. Generate text prompts
         prompts = self.generate_time_series_prompt(x_enc, self.description, self.config.pred_len, self.config.seq_len)
-        # Ensure prompts is a list and has the correct length
+        # Ensure prompts list has length B
         if not isinstance(prompts, list):
             prompts = prompts.tolist()
         if len(prompts)!= B:
             prompts = prompts[:B] if len(prompts) > B else prompts + [prompts[-1]] * (B - len(prompts))
+        # Assert each prompt has two captions
+        assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
 
         # 3. Use CLIP's processor and model to extract embeddings
         try:
-            encoding = self.clip_processor(
+            # Process images through CLIP
+            processed_images = self.clip_processor(
                 images=images, 
-                text=prompts,
-                return_tensors="pt", 
+                return_tensors="pt"
+                )["pixel_values"].to(device)
+            with torch.no_grad():
+                image_embeddings = self.clip_model.get_image_features(processed_images)  # Shape: [B * nvars, 512]
+
+            # Flatten all text prompts
+            all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
+            text_encodings = self.clip_processor(
+                text=all_text_prompts,
+                return_tensors="pt",
                 padding=True
             ).to(device)
-
             with torch.no_grad():
-                clip_outputs = self.clip_model(**encoding)
-                text_embedding = clip_outputs.text_embeds
-                image_embedding = clip_outputs.image_embeds
+                text_embeddings = self.clip_model.get_text_features(**text_encodings)  # Shape: [B * 2, 512]
 
         except Exception as e:
             print(f"Error processing data: {e}")
@@ -310,108 +331,72 @@ class Model(nn.Module):
             print(f"Prompts: {prompts}")
             raise e
 
-        # 4. Perform multimodal fusion
-        image_embedding = image_embedding.view(B, image_embedding.shape[0] // B, image_embedding.shape[-1])  # Reshape to [B, num_patches, 512]
-        text_embedding = text_embedding.view(B, text_embedding.shape[0] // B, text_embedding.shape[-1])  # Reshape to [B, num_patches, 512]
-        fused_embedding = torch.cat([text_embedding, image_embedding], dim=1)
-        fusion_len = fused_embedding.shape[1]
-        
-        if self.clip_fusion_len != fusion_len:
-            self.clip_fusion_len = fusion_len
-            self.sequence_projection = nn.Linear(self.clip_fusion_len, self.pred_len).to(fused_embedding.device)
-    
-        # 5. Sequence projection
-        fused_embedding = fused_embedding.transpose(1, 2)  # [B, hidden_dim, seq_len]
-        fused_embedding = self.sequence_projection(fused_embedding)
-        fused_embedding = fused_embedding.transpose(1, 2)  # [B, seq_len, hidden_dim]
+        # Reshape embeddings to [B, n_prompts, embedding_dim]
+        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, 512]
+        image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, 512]
 
-        # 6. Prediction
-        predictions = self.predictor(fused_embedding)   # [32, 96, 21]
-        predictions = predictions.view(B, self.pred_len, -1)
+        # 4. Fuse text and image embeddings
+        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 + nvars, 512]
+        
+        # 6. Apply temporal projection
+        fused_projected = self.sequence_projection(fused_embeddings)  # Shape: [B, fusion_dim, pred_len]
+        
+        # 7. Predict using MLP
+        predictions = self.predictor(fused_projected)  # Shape: [B, pred_len, c_out]
         
         # 7. Denormalize the prediction results
-        y = Denormalization(predictions, means, stdev, self.config.pred_len)
+        y = self._denormalize_output(predictions, means, stdev)
 
         return y
 
+    def _normalize_input(self, x):
+        """
+        Normalize the input time series data.
 
-def Normalization(x, norm_const=1.):
+        Args:
+            - x: Input data of shape [B, L, D].
+
+        Returns:
+            - Normalized data.
+            - Means of each feature.
+            - Standard deviations of each feature.
+        """
+        means = x.mean(1, keepdim=True).detach()  # Calculate mean values and detach gradients [B, 1, nvars]
+        x = x - means  # Subtract mean values
+        stdev = torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)  # Calculate standard deviations and prevent division by zero [B, 1, nvars]
+        stdev /= self.norm_const  # Adjust standard deviations
+        x = x / stdev  
+        return x, means, stdev
+    
+    def _denormalize_output(self, y, means, stdev):
+        """
+        Denormalize the model's output predictions.
+
+        Args:
+            - y: Output predictions of shape [B, pred_len, c_out].
+            - means: Means of the original data.
+            - stdev: Standard deviations of the original data.
+
+        Returns:
+            - y: Denormalized data.
+        """
+        y = y * (stdev.repeat(1, self.pred_len, 1))
+        y = y + (means.repeat(1, self.pred_len, 1))
+        return y
+
+
+def test_tensor(tensor):
     """
-    Normalize the input data.
-
-    Args:
-    - x: Input data.
-    - norm_const: Normalization constant.
-
-    Returns:
-    - x: Normalized data.
-    - means: Mean values.
-    - stdev: Standard deviations.
+    Utility function to print tensor statistics for debugging.
     """
-    means = x.mean(1, keepdim=True).detach()  # Calculate mean values and detach gradients [B, 1, nvars]
-    x = x - means  # Subtract mean values
-    stdev = torch.sqrt(
-        torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)  # Calculate standard deviations and prevent division by zero [B, 1, nvars]
-    stdev /= norm_const  # Adjust standard deviations
-    x = x / stdev  
-    return x, means, stdev
-
-
-def Denormalization(y, means, std, padding=0):
-    """
-    Denormalize the output data.
-
-    Args:
-    - y: Output data.
-    - means: Mean values.
-    - std: Standard deviations.
-    - padding: Padding value.
-
-    Returns:
-    - y: Denormalized data.
-    """
-    y = y * (std.repeat(1, padding, 1))  # Restore original scale [B, T, nvars]
-    y = y + (means.repeat(1, padding, 1))  # Restore original value range
-    return y  # Return denormalized data
-
-
-def test(tensor):
-    """
-    Args:
-    - tensor: Input tensor.
-    """
-    print("shape:", tensor.shape)  # Output tensor shape
-    print("avg:", tensor.mean())  # Calculate tensor average
-    print("std:", tensor.std())  # Calculate tensor standard deviation
-    print("min:", tensor.min())  # Find minimum value in tensor
-    print("max:", tensor.max())  # Find maximum value in tensor
-    print("NaN?", torch.isnan(tensor).any())  # Check for NaN values
-    print("Inf?", torch.isinf(tensor).any())  # Check for infinite values
-    print("grad:", tensor.grad)  # Check tensor gradient
-
-
-def check_image_range(np_img):
-    """
-    Check the data type and range of an image, and normalize it.
-
-    Args:
-    - np_img: Input image.
-
-    Returns:
-    - np_img: Normalized image.
-    """
-    # Check data type and range, normalize
-    if np_img.dtype != np.uint8:
-        min_val = np_img.min()
-        max_val = np_img.max()
-        if min_val < 0 or max_val > 1:
-            if max_val - min_val == 0:
-                raise ValueError("Image has zero variance. Cannot normalize.")
-            np_img = (np_img - min_val) / (max_val - min_val)
-
-        # Convert to [0, 255] and change data type
-        np_img = (np_img * 255).astype(np.uint8)
-    return np_img
+    print("Shape:", tensor.shape)
+    print("Average:", tensor.mean().item())
+    print("Std Dev:", tensor.std().item())
+    print("Min:", tensor.min().item())
+    print("Max:", tensor.max().item())
+    print("Contains NaN:", torch.isnan(tensor).any().item())
+    print("Contains Inf:", torch.isinf(tensor).any().item())
+    print("Gradient:", tensor.grad)
 
 
 def check_image_channel(np_img):
@@ -453,3 +438,25 @@ def test_cuda_memory(device):
     # Force garbage collection
     import gc
     gc.collect()
+
+
+class TemporalProjection(nn.Module):
+    def __init__(self, fusion_dim, d_model, pred_len, nhead=8, dropout=0.1):
+        super().__init__()
+        # Temporal Feature Extraction
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(fusion_dim, fusion_dim*2, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(fusion_dim*2, pred_len, kernel_size=3, padding=1)
+        )
+        # Self-Attention Layer
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.norm = nn.LayerNorm(d_model)
+        
+    def forward(self, x):  # x: [B, FD, d_model]
+        conv_out = self.conv_block(x)  # [B, FD, d_model] => [B, FD, d_model]
+        attn_in = self.norm(conv_out)
+        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [B, d_model, pred_len] 
+        out = self.norm(attn_out)
+        return out
