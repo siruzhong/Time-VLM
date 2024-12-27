@@ -1,18 +1,13 @@
 checkpoints
-dataset/*
+dataset
 **/__pycache__/
 tutorial/ckpt
-tutorial/Copy of ckpt
 tutorial/*.pth
 tutorial/checkpoints
-results
-test_results
-/*.txt
-!requirement.txt
-ckpt
 wandb/
-src/TimeDiff/visualizations
 image_visualization
 timevlm_image_visualization
 output_images
 src/LDM4TS/visualizations
+logs
+ts-images

@@ -268,7 +268,7 @@ class Model(nn.Module):
         - images: A tensor containing the images to be saved.
         - batch_idx: Index of the current batch.
         """
-        save_dir = "timevlm_image_visualization"
+        save_dir = "ts-images/timevlm"
         os.makedirs(save_dir, exist_ok=True)
         for i, img_tensor in enumerate(images):
             img_tensor = img_tensor.cpu().numpy().transpose(1, 2, 0) * 255  # Convert to [H, W, C] and scale to [0, 255]
