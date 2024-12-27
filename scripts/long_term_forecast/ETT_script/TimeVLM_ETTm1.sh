@@ -30,7 +30,7 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
-  --use_amp 1 \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -61,7 +61,7 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
-  --use_amp 1 \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -92,7 +92,7 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
-  --use_amp 1 \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -123,7 +123,7 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
-  --use_amp 1 \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
