@@ -1,10 +1,14 @@
 model_name=TimeVLM
+gpu=2
 image_size=224
 predictor_hidden_dims=128
 periodicity=24
 norm_const=0.4
 three_channel_image=True
 finetune_clip=False
+batch_size=8
+num_workers=16
+learning_rate=0.001
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -26,13 +30,17 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --use_multi_gpu \
+  --gpu $gpu \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -54,13 +62,17 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --use_multi_gpu \
+  --gpu $gpu \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -82,13 +94,17 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --use_multi_gpu \
+  --gpu $gpu \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -110,10 +126,14 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --use_multi_gpu \
+  --gpu $gpu \
+  --use_amp \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
