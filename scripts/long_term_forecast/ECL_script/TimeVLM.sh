@@ -2,7 +2,7 @@ model_name=TimeVLM
 gpu=0
 image_size=224
 predictor_hidden_dims=128
-periodicity=96
+periodicity=24
 norm_const=0.4
 three_channel_image=True
 fine_tuning_clip=False
@@ -10,22 +10,22 @@ fine_tuning_clip=False
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/ETT-small/ \
-  --data_path ETTm2.csv \
-  --model_id ETTm2_96_48 \
+  --root_path ./dataset/electricity/ \
+  --data_path electricity.csv \
+  --model_id ECL_96_96 \
   --model $model_name \
-  --data ETTm2 \
+  --data custom \
   --features M \
   --seq_len 96 \
+  --label_len 48 \
   --pred_len 96 \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 7 \
-  --dec_in 7 \
-  --c_out 7 \
+  --enc_in 321 \
+  --dec_in 321 \
+  --c_out 321 \
   --des 'Exp' \
-  --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
@@ -35,26 +35,25 @@ python -u run.py \
   --three_channel_image $three_channel_image \
   --fine_tuning_clip $fine_tuning_clip
 
-
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/ETT-small/ \
-  --data_path ETTm2.csv \
-  --model_id ETTm2_192_96 \
+  --root_path ./dataset/electricity/ \
+  --data_path electricity.csv \
+  --model_id ECL_96_192 \
   --model $model_name \
-  --data ETTm2 \
+  --data custom \
   --features M \
   --seq_len 96 \
+  --label_len 48 \
   --pred_len 192 \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 7 \
-  --dec_in 7 \
-  --c_out 7 \
+  --enc_in 321 \
+  --dec_in 321 \
+  --c_out 321 \
   --des 'Exp' \
-  --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
@@ -67,22 +66,22 @@ python -u run.py \
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/ETT-small/ \
-  --data_path ETTm2.csv \
-  --model_id ETTm2_288_144 \
+  --root_path ./dataset/electricity/ \
+  --data_path electricity.csv \
+  --model_id ECL_96_336 \
   --model $model_name \
-  --data ETTm2 \
+  --data custom \
   --features M \
   --seq_len 96 \
+  --label_len 48 \
   --pred_len 336 \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 7 \
-  --dec_in 7 \
-  --c_out 7 \
+  --enc_in 321 \
+  --dec_in 321 \
+  --c_out 321 \
   --des 'Exp' \
-  --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
@@ -95,22 +94,22 @@ python -u run.py \
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
-  --root_path ./dataset/ETT-small/ \
-  --data_path ETTm2.csv \
-  --model_id ETTm2_384_192 \
+  --root_path ./dataset/electricity/ \
+  --data_path electricity.csv \
+  --model_id ECL_96_720 \
   --model $model_name \
-  --data ETTm2 \
+  --data custom \
   --features M \
   --seq_len 96 \
+  --label_len 48 \
   --pred_len 720 \
   --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
-  --enc_in 7 \
-  --dec_in 7 \
-  --c_out 7 \
+  --enc_in 321 \
+  --dec_in 321 \
+  --c_out 321 \
   --des 'Exp' \
-  --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \

@@ -1,6 +1,11 @@
 model_name=TimeVLM
 gpu=0
+image_size=224
 predictor_hidden_dims=128
+periodicity=24
+norm_const=0.4
+three_channel_image=True
+fine_tuning_clip=False
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -23,7 +28,12 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
+  --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims
+  --norm_const $norm_const \
+  --periodicity $periodicity \
+  --three_channel_image $three_channel_image \
+  --fine_tuning_clip $fine_tuning_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -46,7 +56,12 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
+  --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims
+  --norm_const $norm_const \
+  --periodicity $periodicity \
+  --three_channel_image $three_channel_image \
+  --fine_tuning_clip $fine_tuning_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -69,7 +84,12 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
+  --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims
+  --norm_const $norm_const \
+  --periodicity $periodicity \
+  --three_channel_image $three_channel_image \
+  --fine_tuning_clip $fine_tuning_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -92,4 +112,9 @@ python -u run.py \
   --des 'Exp' \
   --itr 1 \
   --gpu $gpu \
+  --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims
+  --norm_const $norm_const \
+  --periodicity $periodicity \
+  --three_channel_image $three_channel_image \
+  --fine_tuning_clip $fine_tuning_clip
