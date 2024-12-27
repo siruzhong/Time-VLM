@@ -1,5 +1,4 @@
 model_name=TimeVLM
-gpu=0
 image_size=224
 predictor_hidden_dims=128
 periodicity=24
@@ -27,7 +26,7 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --gpu $gpu \
+  --use_multi_gpu \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -55,7 +54,7 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --gpu $gpu \
+  --use_multi_gpu \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -83,7 +82,7 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --gpu $gpu \
+  --use_multi_gpu \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -111,7 +110,7 @@ python -u run.py \
   --c_out 862 \
   --des 'Exp' \
   --itr 1 \
-  --gpu $gpu \
+  --use_multi_gpu \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \

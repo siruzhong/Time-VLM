@@ -11,6 +11,16 @@ from utils.tools import load_content
 import random
 import numpy as np
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+    
 if __name__ == '__main__':
     fix_seed = 2024
     random.seed(fix_seed)
@@ -93,8 +103,8 @@ if __name__ == '__main__':
     parser.add_argument('--periodicity', type=int, default=96)
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
-    parser.add_argument('--three_channel_image', type=bool, default=True, help='use three channel image')
-    parser.add_argument('--finetune_clip', type=bool, default=False, help='finetune clip model')
+    parser.add_argument('--three_channel_image', type=str2bool, default=True, help='use three channel image')
+    parser.add_argument('--finetune_clip', type=str2bool, default=False, help='finetune clip model')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
