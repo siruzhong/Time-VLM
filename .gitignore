@@ -8,3 +8,5 @@ wandb/
 src/LDM4TS/visualizations
 logs
 ts-images
+results
+test_results

@@ -6,6 +6,9 @@ periodicity=96
 norm_const=0.4
 three_channel_image=True
 finetune_clip=False
+batch_size=64
+num_workers=16
+learning_rate=0.001
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -28,13 +31,16 @@ python -u run.py \
   --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
+  --use_amp 1 \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
-
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -57,12 +63,16 @@ python -u run.py \
   --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
+  --use_amp 1 \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -85,12 +95,16 @@ python -u run.py \
   --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
+  --use_amp 1 \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -113,9 +127,13 @@ python -u run.py \
   --learning_rate 0.001 \
   --itr 1 \
   --gpu $gpu \
+  --use_amp 1 \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip
+  --finetune_clip $finetune_clip \
+  --batch_size $batch_size \
+  --learning_rate $learning_rate \
+  --num_workers $num_workers
