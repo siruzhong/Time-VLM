@@ -28,7 +28,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -55,7 +55,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -82,7 +82,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -109,7 +109,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \

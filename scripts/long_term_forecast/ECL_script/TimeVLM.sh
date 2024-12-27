@@ -1,5 +1,5 @@
 model_name=TimeVLM
-gpu=0
+use_multi_gpu=1
 image_size=224
 predictor_hidden_dims=128
 periodicity=24
@@ -27,9 +27,9 @@ python -u run.py \
   --c_out 321 \
   --des 'Exp' \
   --itr 1 \
-  --gpu $gpu \
+  --use_multi_gpu $use_multi_gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -57,7 +57,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -85,7 +85,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -113,7 +113,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims
+  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
