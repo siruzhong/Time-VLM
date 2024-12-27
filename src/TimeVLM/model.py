@@ -12,7 +12,6 @@ from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 from torchvision.transforms import Resize
 from pytorch_wavelets import DWTForward
-import kornia.augmentation as K
 
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
@@ -43,9 +42,6 @@ class Model(nn.Module):
         self.clip_fusion_len = config.c_out + 2  # CLIP fusion hidden layer dimensions
         self.predictor_hidden_dims = config.predictor_hidden_dims  # MLP predictor hidden layer dimensions
         self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32)
-
-        # Initialize image resizing using Kornia
-        self.resize = K.Resize((self.image_size, self.image_size), resample='BILINEAR')
 
         # Initialize wavelet transform
         self.dwt = DWTForward(J=1, wave='haar')
@@ -188,7 +184,7 @@ class Model(nn.Module):
         x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=periodicity)
         
         # Resize the time series data
-        x_resized_2d = self.resize(x_2d)  # Shape: [B * nvars, 1, image_size, image_size]
+        x_resized_2d = F.interpolate(x_2d, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)  # Shape: [B * nvars, 1, image_size, image_size]
 
         # Convert to 3-channel image
         if self.three_channel_image:
@@ -196,8 +192,8 @@ class Model(nn.Module):
             x_fft = self._apply_fourier_transform(x_2d)
             x_wavelet = self._apply_wavelet_transform(x_2d)
             # Resize the Fourier or wavelet transformed data as image input using interpolation
-            x_resized_fft = self.resize(x_fft)  # [b*n, 1, image_size, image_size]
-            x_resized_wavelet = self.resize(x_wavelet)  # [b*n, 1, image_size, image_size]
+            x_resized_fft = F.interpolate(x_fft, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False) # [b*n, 1, image_size, image_size]
+            x_resized_wavelet = F.interpolate(x_wavelet, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False) # [b*n, 1, image_size, image_size]
             # Concatenate along the channel dimension to form a 3-channel image
             images = torch.concat([x_resized_2d, x_resized_fft, x_resized_wavelet], dim=1)  # [b*n, 3, h, w]
         else:

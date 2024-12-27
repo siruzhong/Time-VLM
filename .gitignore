@@ -5,9 +5,6 @@ tutorial/ckpt
 tutorial/*.pth
 tutorial/checkpoints
 wandb/
-image_visualization
-timevlm_image_visualization
-output_images
 src/LDM4TS/visualizations
 logs
 ts-images
