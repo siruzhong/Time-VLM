@@ -5,7 +5,7 @@ predictor_hidden_dims=128
 periodicity=24
 norm_const=0.4
 three_channel_image=True
-fine_tuning_clip=False
+finetune_clip=False
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -33,7 +33,7 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --fine_tuning_clip $fine_tuning_clip
+  --finetune_clip $finetune_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -61,7 +61,7 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --fine_tuning_clip $fine_tuning_clip
+  --finetune_clip $finetune_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -89,7 +89,7 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --fine_tuning_clip $fine_tuning_clip
+  --finetune_clip $finetune_clip
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -117,4 +117,4 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --fine_tuning_clip $fine_tuning_clip
+  --finetune_clip $finetune_clip
