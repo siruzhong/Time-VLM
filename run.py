@@ -159,15 +159,6 @@ if __name__ == '__main__':
         args.device_ids = [int(id_) for id_ in device_ids]
         args.gpu = args.device_ids[0]
 
-    # set the preiodicity of the dataset
-    dataset = args.data_path.replace('.csv', '')
-    if dataset in ['ETTh1', 'ETTh2', 'electricity', "traffic"]:
-        args.periodicity = 24
-    elif dataset in ['ETTm1', 'ETTm2']:
-        args.periodicity = 96
-    elif dataset in ['weather']:
-        args.periodicity = 144
-
     args.content = load_content(args)
 
     print('Args in experiment:')
@@ -182,6 +173,10 @@ if __name__ == '__main__':
     print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
     print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
     print(f'  {"Finetune Clip:":<20}{args.finetune_clip:<20}')
+    print(f'  {"Batch Size:":<20}{args.batch_size:<20}')
+    print(f'  {"Num Workers:":<20}{args.num_workers:<20}')
+    print(f'  {"Learning Rate:":<20}{args.learning_rate:<20}')
+    print(f'  {"Seq Len:":<20}{args.seq_len:<20}')
     print()
 
     if args.task_name == 'long_term_forecast':

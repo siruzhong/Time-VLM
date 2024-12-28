@@ -1,3 +1,4 @@
+export TOKENIZERS_PARALLELISM=false
 model_name=TimeVLM
 gpu=1
 image_size=224
@@ -7,7 +8,7 @@ norm_const=0.4
 three_channel_image=True
 finetune_clip=False
 batch_size=64
-num_workers=32
+num_workers=16
 learning_rate=0.001
 
 python -u run.py \

@@ -1,3 +1,4 @@
+export TOKENIZERS_PARALLELISM=false
 model_name=TimeVLM
 gpu=2
 image_size=224
