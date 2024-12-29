@@ -142,7 +142,7 @@ if __name__ == '__main__':
     parser.add_argument('--llm_model', type=str, default='GPT2', help='LLM model') # LLAMA, GPT2, BERT
     parser.add_argument('--llm_dim', type=int, default='768', help='LLM model dimension')# LLama7b:4096; GPT2-small:768; BERT-base:768
     parser.add_argument('--stride', type=int, default=8, help='stride')
-    parser.add_argument('--padding', type=int, default=0, help='padding')
+    parser.add_argument('--padding', type=int, default=8, help='padding')
     parser.add_argument('--patch_len', type=int, default=16, help='patch length')
     parser.add_argument('--llm_layers', type=int, default=1)
     parser.add_argument('--prompt_domain', type=int, default=0, help='')

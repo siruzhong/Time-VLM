@@ -61,24 +61,38 @@ class Model(nn.Module):
         # Print the total number of learnable parameters in CLIP
         learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
         print(f"CLIP Learnable model parameters: {learnable_params}")
+        
+        # Initialize SequenceProjection module
+        self.sequence_projection = nn.Sequential(
+            nn.Linear(self.clip_fusion_len, self.pred_len),
+            nn.ReLU()
+        )
 
         # Initialize TemporalProjection module
-        # self.sequence_projection = nn.Sequential(
-        #     nn.Linear(self.clip_fusion_len, self.pred_len),
-        #     nn.ReLU()
-        # )
-        self.sequence_projection = TemporalProjection(
+        self.temporal_projection = TemporalProjection(
             fusion_dim=self.clip_fusion_len,
             d_model=self.clip_hidden_size,
             pred_len=self.pred_len,
             dropout=config.dropout
+        )
+        
+        # Initialize PatchEmbedding module
+        self.patch_embedding = PatchEmbedding(config.d_model, config.patch_len, config.stride, config.padding, config.dropout)
+        # Calculate the number of features after patching
+        self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
+        # Initialize the head module
+        self.temporal_head = FlattenHead(
+            config.enc_in, 
+            self.head_nf, 
+            config.pred_len, 
+            head_dropout=config.dropout
         )
 
         # Initialize MLP predictor
         self.predictor = nn.Sequential(
             nn.Linear(self.clip_hidden_size, self.predictor_hidden_dims),
             nn.ReLU(),
-            nn.Dropout(0.1),
+            nn.Dropout(config.dropout),
             nn.Linear(self.predictor_hidden_dims, config.c_out)
         )
 
@@ -243,8 +257,8 @@ class Model(nn.Module):
         - Tensor: Normalized images as uint8 with shape [B, C, H, W]
         """
         # Compute min and max per image across all channels and spatial dimensions
-        min_vals = images.view(images.size(0), -1).min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
-        max_vals = images.view(images.size(0), -1).max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+        min_vals = images.reshape(images.size(0), -1).min(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
+        max_vals = images.reshape(images.size(0), -1).max(dim=1, keepdim=True)[0].view(-1, 1, 1, 1)
         # Avoid division by zero by adding a small epsilon
         epsilon = 1e-5
         scale = (max_vals - min_vals).clamp(min=epsilon)
@@ -287,6 +301,7 @@ class Model(nn.Module):
 
         # Normalize the input data
         x_enc, means, stdev = self._normalize_input(x_enc)
+        patchs, _ = self.patch_embedding(x_enc.transpose(1, 2))
 
         # 1. Convert time series data to images
         images = self.time_series_to_image(x_enc, self.seq_len, self.periodicity)  # Shape: [B * nvars, 3, H, W]
@@ -335,12 +350,15 @@ class Model(nn.Module):
         fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 + nvars, 512]
         
         # 6. Apply temporal projection
-        fused_projected = self.sequence_projection(fused_embeddings)  # Shape: [B, fusion_dim, pred_len]
+        fused_projected = self.temporal_projection(fused_embeddings)  # Shape: [B, fusion_dim, pred_len]
         
         # 7. Predict using MLP
         predictions = self.predictor(fused_projected)  # Shape: [B, pred_len, c_out]
         
         # 7. Denormalize the prediction results
+        supplementary_features = self.temporal_head(patchs)
+        supplementary_features = einops.rearrange(supplementary_features, '(b n) d -> b d n', b=B)
+        predictions += supplementary_features
         y = self._denormalize_output(predictions, means, stdev)
 
         return y
@@ -456,3 +474,18 @@ class TemporalProjection(nn.Module):
         attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [B, d_model, pred_len] 
         out = self.norm(attn_out)
         return out
+
+
+class FlattenHead(nn.Module):
+    def __init__(self, n_vars, nf, target_window, head_dropout=0):
+        super().__init__()
+        self.n_vars = n_vars
+        self.flatten = nn.Flatten(start_dim=-2)
+        self.linear = nn.Linear(nf, target_window)
+        self.dropout = nn.Dropout(head_dropout)
+
+    def forward(self, x):  # x: [bs x nvars x d_model x patch_num]
+        x = self.flatten(x)
+        x = self.linear(x)
+        x = self.dropout(x)
+        return x
