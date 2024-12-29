@@ -7,7 +7,7 @@ periodicity=24
 norm_const=0.4
 three_channel_image=True
 finetune_clip=False
-batch_size=8
+batch_size=24
 num_workers=32
 learning_rate=0.001
 

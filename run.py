@@ -97,6 +97,7 @@ if __name__ == '__main__':
     parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
     
     # hyperparameters
+    parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, etc.')
     parser.add_argument('--image_size', type=int, default=224, help='image size for time series to image')
     parser.add_argument('--predictor_hidden_dims', type=int, default=16, help='hidden layer dimensions of predictor')
     parser.add_argument('--llm_output_len', type=int, default=256, help='output length of the LLM in BLIP-2')
@@ -104,7 +105,8 @@ if __name__ == '__main__':
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
     parser.add_argument('--three_channel_image', type=str2bool, default=True, help='use three channel image')
-    parser.add_argument('--finetune_clip', type=str2bool, default=False, help='finetune clip model')
+    parser.add_argument('--finetune_clip', type=str2bool, default=False, help='finetune CLIP model')
+    parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
@@ -165,6 +167,7 @@ if __name__ == '__main__':
     print_args(args)
     
     print("\033[1m" + "Hyperparameters" + "\033[0m")
+    print(f'  {"VLM Type:":<20}{args.vlm_type:<20}')
     print(f'  {"Image Size:":<20}{args.image_size:<20}')
     predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
     print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
@@ -172,7 +175,7 @@ if __name__ == '__main__':
     print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
     print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
     print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
-    print(f'  {"Finetune Clip:":<20}{args.finetune_clip:<20}')
+    print(f'  {"Finetune VLM:":<20}{args.finetune_vlm:<20}')
     print(f'  {"Batch Size:":<20}{args.batch_size:<20}')
     print(f'  {"Num Workers:":<20}{args.num_workers:<20}')
     print(f'  {"Learning Rate:":<20}{args.learning_rate:<20}')

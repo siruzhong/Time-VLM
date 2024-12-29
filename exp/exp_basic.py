@@ -48,6 +48,9 @@ class Exp_Basic(object):
         if args.model == 'TimeVLM_rwl':
             from src.TimeVLM import model_rwl as TimeVLM_rwl
             self.model_dict['TimeVLM_rwl'] = TimeVLM_rwl
+        if args.model == 'TimeVLM_new':
+            from src.TimeVLM import model_new as TimeVLM_new
+            self.model_dict['TimeVLM_new'] = TimeVLM_new
         if args.model == 'LDM4TS':
             from src.LDM4TS import model as LDM4TS
             self.model_dict['LDM4TS'] = LDM4TS
