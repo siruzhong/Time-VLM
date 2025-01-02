@@ -42,6 +42,7 @@ class Model(nn.Module):
         self.clip_fusion_len = config.c_out + 2  # CLIP fusion hidden layer dimensions
         self.predictor_hidden_dims = config.predictor_hidden_dims  # MLP predictor hidden layer dimensions
         self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32)
+        self.is_training = config.is_training
 
         # Initialize wavelet transform
         self.dwt = DWTForward(J=1, wave='haar')
@@ -60,7 +61,8 @@ class Model(nn.Module):
 
         # Print the total number of learnable parameters in CLIP
         learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
-        print(f"CLIP Learnable model parameters: {learnable_params}")
+        if self.is_training:
+            print(f"CLIP Learnable model parameters: {learnable_params}")
         
         # Initialize SequenceProjection module
         self.sequence_projection = nn.Sequential(

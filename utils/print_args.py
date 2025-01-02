@@ -1,4 +1,5 @@
 def print_args(args):
+    print('Args in experiment:')
     print("\033[1m" + "Basic Config" + "\033[0m")
     print(f'  {"Task Name:":<20}{args.task_name:<20}{"Is Training:":<20}{args.is_training:<20}')
     print(f'  {"Model ID:":<20}{args.model_id:<20}{"Model:":<20}{args.model:<20}')
@@ -55,4 +56,22 @@ def print_args(args):
     print("\033[1m" + "De-stationary Projector Params" + "\033[0m")
     p_hidden_dims_str = ', '.join(map(str, args.p_hidden_dims))
     print(f'  {"P Hidden Dims:":<20}{p_hidden_dims_str:<20}{"P Hidden Layers:":<20}{args.p_hidden_layers:<20}') 
+    print()
+    
+
+def print_hyperparameters(args):
+    print("\033[1m" + "Hyperparameters" + "\033[0m")
+    print(f'  {"VLM Type:":<20}{args.vlm_type:<20}')
+    print(f'  {"Image Size:":<20}{args.image_size:<20}')
+    predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
+    print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
+    print(f'  {"Periodicity:":<20}{args.periodicity:<20}')
+    print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
+    print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
+    print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
+    print(f'  {"Finetune VLM:":<20}{args.finetune_vlm:<20}')
+    print(f'  {"Batch Size:":<20}{args.batch_size:<20}')
+    print(f'  {"Num Workers:":<20}{args.num_workers:<20}')
+    print(f'  {"Learning Rate:":<20}{args.learning_rate:<20}')
+    print(f'  {"Seq Len:":<20}{args.seq_len:<20}')
     print()

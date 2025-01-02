@@ -58,7 +58,8 @@ class Exp_Basic(object):
         self.device = self._acquire_device()
         self.model = self._build_model().to(self.device)
         
-        self._log_model_parameters()
+        if args.is_training:
+            self._log_model_parameters()
         
         
     def _log_model_parameters(self):

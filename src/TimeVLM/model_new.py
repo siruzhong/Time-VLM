@@ -37,6 +37,8 @@ class Model(nn.Module):
         self.save_images_flag = False  # Set to True to save generated images
         self.norm_const = config.norm_const
         self.predictor_hidden_dims = config.predictor_hidden_dims  # MLP predictor hidden layer dimensions
+        self.vlm_max_text_input_length = 77  # Maximum input length for the VLM
+        self.is_training = config.is_training
 
         # Initialize patch embedding
         self.patch_embedding = PatchEmbedding(config.d_model, config.patch_len, config.stride, config.padding, config.dropout)
@@ -65,11 +67,13 @@ class Model(nn.Module):
                 self._set_requires_grad(self.clip_model.text_model.encoder.layers[-1], True)
 
             # Print the total number of learnable parameters in CLIP
-            learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
-            print(f"CLIP Learnable model parameters: {learnable_params}")
+            if self.is_training:
+                learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
+                print(f"CLIP Learnable model parameters: {learnable_params}")
             
             # Set CLIP hidden size and fusion length
             self.detail_prompt = False  # Set to True to include dataset description in the prompt
+            self.vlm_max_text_input_length = 77
             self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32)
             self.clip_fusion_len = config.c_out + 2  # CLIP fusion hidden layer dimensions
 
@@ -105,8 +109,9 @@ class Model(nn.Module):
             self._set_requires_grad(self.blip2_model, False)
             
             # Print the total number of learnable parameters in BLIP2
-            learnable_params = sum(p.numel() for p in self.blip2_model.parameters() if p.requires_grad)
-            print(f"BLIP2 Learnable model parameters: {learnable_params}")
+            if self.is_training:
+                learnable_params = sum(p.numel() for p in self.blip2_model.parameters() if p.requires_grad)
+                print(f"BLIP2 Learnable model parameters: {learnable_params}")
             
             # Set BLIP2 hidden size and fusion length
             self.detail_prompt = True
@@ -134,6 +139,51 @@ class Model(nn.Module):
                 nn.Dropout(config.dropout),
                 nn.Linear(self.predictor_hidden_dims, config.c_out)
             )
+            
+        elif self.vlm_type == "vilt":
+            # Initialize VILT processor and model
+            VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
+            self.vilt_processor = ViltProcessor.from_pretrained(VILT_ARCH)
+            self.vilt_model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
+            
+            # Freeze VILT model parameters
+            self._set_requires_grad(self.vilt_model, False)
+            
+            # Print the total number of learnable parameters in VILT
+            if self.is_training:
+                print(f"ViLT max_position_embeddings: {self.vilt_model.config.max_position_embeddings}")
+                print(f"ViLT hidden_size: {self.vilt_model.config.hidden_size}")
+                print(f"ViLT image_size: {self.vilt_processor.image_processor.size}")
+                learnable_params = sum(p.numel() for p in self.vilt_model.parameters() if p.requires_grad)
+                print(f"ViLT Learnable model parameters: {learnable_params}")
+            
+            self.detail_prompt = False
+            self.vlm_max_text_input_length = 40
+            self.vilt_hidden_size = 768
+            self.vilt_fusion_len = 180
+            
+            # Initialize SequenceProjection module
+            self.sequence_projection = nn.Sequential(
+                nn.Linear(self.vilt_fusion_len, self.pred_len),
+                nn.ReLU()
+            )
+            
+            # Initialize TemporalProjection module
+            self.temporal_projection = TemporalProjection(
+                fusion_dim=self.vilt_fusion_len,
+                d_model=self.vilt_hidden_size,
+                pred_len=self.pred_len,
+                dropout=config.dropout
+            )
+            
+            # Initialize MLP predictor
+            self.predictor = nn.Sequential(
+                nn.Linear(self.vilt_hidden_size, self.predictor_hidden_dims),
+                nn.ReLU(),
+                nn.Dropout(config.dropout),
+                nn.Linear(self.predictor_hidden_dims, config.c_out)
+            )
+            
         else:
             raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2'].")
 
@@ -210,9 +260,9 @@ class Model(nn.Module):
                 prompts.append(prompt)
             else:
                 image_part = f"{seq_len}-time-step img, predict {pred_len} steps."
-                image_part = image_part[:77] if len(image_part) > 77 else image_part
+                image_part = image_part[:self.vlm_max_text_input_length] if len(image_part) > self.vlm_max_text_input_length else image_part
                 stats_part = (f"Stats: range={float(min_values_str):.6f}~{float(max_values_str):.6f}, trend={trend_direction}, lags={lags_values_str}.")
-                stats_part = stats_part[:77] if len(stats_part) > 77 else stats_part
+                stats_part = stats_part[:self.vlm_max_text_input_length] if len(stats_part) > self.vlm_max_text_input_length else stats_part
                 prompts.append([image_part, stats_part])
 
         return prompts
@@ -430,6 +480,36 @@ class Model(nn.Module):
             # Concatenate embeddings from all batches to get the final fused embeddings
             fused_embeddings = torch.cat(embeddings_list, dim=0)  # [B, seq_len, hidden_dim] => [32, 256, 2560]
             
+        elif self.vlm_type == "vilt":
+            
+            sub_batch_size = 32
+            embeddings_list = []  # Store embeddings for each batch
+            
+            for i in range(0, B, sub_batch_size):
+                end_idx = min(i + sub_batch_size, B)
+                batch_images = images[i:end_idx]
+
+                try:
+                    encoding = self.vilt_processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(device)
+                    with torch.no_grad():
+                        vilt_outputs = self.vilt_model(**encoding, output_hidden_states=True)
+                    vilt_outputs = vilt_outputs.hidden_states[-1]
+                    embeddings_list.append(vilt_outputs)
+                                    
+                except Exception as e:
+                    print(f"Error processing data: {e}")
+                    print(f"Images shape: {images.shape}")
+                    print(f"Prompts len: {len(prompts)}")
+                    raise e
+            
+            fused_embeddings = torch.cat(embeddings_list, dim=0) 
+            # Truncate or pad the output sequence length, as the model may output more or fewer tokens                    
+            if fused_embeddings.shape[1] > self.vilt_fusion_len:
+                fused_embeddings = fused_embeddings[:, :self.vilt_fusion_len, :]
+            elif fused_embeddings.shape[1] < self.vilt_fusion_len:
+                repeat_times = -(-self.vilt_fusion_len // fused_embeddings.shape[1])
+                fused_embeddings = fused_embeddings.repeat(1, repeat_times, 1)[:, :self.vilt_fusion_len, :]
+
         # 4. Apply projection on the fused embeddings
         fused_projected = self.temporal_projection(fused_embeddings)  # Shape: [B, fusion_dim, pred_len], or using the sequence projection
     

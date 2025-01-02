@@ -2,11 +2,12 @@ import argparse
 import os
 import torch
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
+from exp.exp_zero_shot_forecasting import Exp_Zero_Shot_Forecast
 from exp.exp_imputation import Exp_Imputation
 from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
 from exp.exp_classification import Exp_Classification
-from utils.print_args import print_args
+from utils.print_args import print_args, print_hyperparameters
 from utils.tools import load_content
 import random
 import numpy as np
@@ -30,7 +31,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='TimeVLM')
 
     # basic config
-    parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast', help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection]')
+    parser.add_argument('--task_name', type=str, required=True, default='long_term_forecast', help='task name, options:[long_term_forecast, short_term_forecast, imputation, classification, anomaly_detection, zero_shot_forecast]')
     parser.add_argument('--is_training', type=int, required=True, default=1, help='status')
     parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
     parser.add_argument('--model', type=str, required=True, default='Autoformer', help='model name, options: [Autoformer, Transformer, TimesNet]')
@@ -150,7 +151,11 @@ if __name__ == '__main__':
     parser.add_argument('--prompt_domain', type=int, default=0, help='')
 
     parser.add_argument('--wo_ts', type=int, default=0, help='without/with Time Series Data 1/0')
-
+    
+    # zero-shot forecasting
+    parser.add_argument('--pretrained_model_path', type=str, default=None, help='pretrained model path')
+    parser.add_argument('--target_data', type=str, default='ETTh2', help='dataset type')
+    
     args = parser.parse_args()
     args.use_gpu = True if torch.cuda.is_available() else False
 
@@ -163,25 +168,6 @@ if __name__ == '__main__':
 
     args.content = load_content(args)
 
-    print('Args in experiment:')
-    print_args(args)
-    
-    print("\033[1m" + "Hyperparameters" + "\033[0m")
-    print(f'  {"VLM Type:":<20}{args.vlm_type:<20}')
-    print(f'  {"Image Size:":<20}{args.image_size:<20}')
-    predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
-    print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
-    print(f'  {"Periodicity:":<20}{args.periodicity:<20}')
-    print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
-    print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
-    print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
-    print(f'  {"Finetune VLM:":<20}{args.finetune_vlm:<20}')
-    print(f'  {"Batch Size:":<20}{args.batch_size:<20}')
-    print(f'  {"Num Workers:":<20}{args.num_workers:<20}')
-    print(f'  {"Learning Rate:":<20}{args.learning_rate:<20}')
-    print(f'  {"Seq Len:":<20}{args.seq_len:<20}')
-    print()
-
     if args.task_name == 'long_term_forecast':
         Exp = Exp_Long_Term_Forecast
     elif args.task_name == 'short_term_forecast':
@@ -192,13 +178,20 @@ if __name__ == '__main__':
         Exp = Exp_Anomaly_Detection
     elif args.task_name == 'classification':
         Exp = Exp_Classification
+    elif args.task_name == 'zero_shot_forecast':
+        Exp = Exp_Zero_Shot_Forecast
     else:
         Exp = Exp_Long_Term_Forecast
 
+    # training mode
     if args.is_training:
+        # print arguments
+        print_args(args)
+        print_hyperparameters(args)
+        
+        # run experiments
         for ii in range(args.itr):
-            # setting record of experiments
-            exp = Exp(args)  # set experiments
+            exp = Exp(args)
             setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}'.format(
                 args.task_name,
                 args.model_id,
@@ -226,8 +219,10 @@ if __name__ == '__main__':
             print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
             exp.test(setting)
             torch.cuda.empty_cache()
+    # inference mode
     else:
         ii = 0
+        exp = Exp(args)
         setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_expand{}_dc{}_fc{}_eb{}_dt{}_{}_{}'.format(
             args.task_name,
             args.model_id,
@@ -248,8 +243,13 @@ if __name__ == '__main__':
             args.embed,
             args.distil,
             args.des, ii)
-
-        exp = Exp(args)  # set experiments
-        print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-        exp.test(setting, test=1)
+     
+        if args.task_name == 'zero_shot_forecast':
+            print(f"[Zero-Shot] Source data: {args.data}, Target data: {args.target_data}, Test prediction length: {args.pred_len}")
+            print(f"Loading pretrained model from: {args.pretrained_model_path}")
+            exp.test(setting)
+        else:
+            print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+            exp.test(setting, test=1)
+        
         torch.cuda.empty_cache()
