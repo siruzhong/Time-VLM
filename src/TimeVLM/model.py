@@ -306,7 +306,13 @@ class Model(nn.Module):
             
             # Freeze VILT model parameters
             self._set_requires_grad(self.vilt_model, False)
-            
+            # Unfreeze the last layer of the VILT encoder
+            if self.finetune_vlm:
+                self._set_requires_grad(self.vilt_model.encoder.layer[-1], True)
+                # Unfreeze the last two layers of the VILT encoder
+                # for layer in self.vilt_model.encoder.layer[-2:]:
+                #     self._set_requires_grad(layer, True)
+        
             # Print the total number of learnable parameters in VILT
             if self.is_training:
                 learnable_params = sum(p.numel() for p in self.vilt_model.parameters() if p.requires_grad)
