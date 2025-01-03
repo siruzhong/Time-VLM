@@ -18,6 +18,31 @@ from layers.models_mae import *
 from transformers.models.vilt import *
 
 
+class AttentionFusion(nn.Module):
+    def __init__(self, embed_dim, num_heads=4, dropout=0.1):
+        super(AttentionFusion, self).__init__()
+        self.multihead_attn = nn.MultiheadAttention(embed_dim=embed_dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+        self.linear = nn.Linear(embed_dim, embed_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(embed_dim)
+    
+    def forward(self, query, key, value):
+        """
+        Args:
+            query: [B, Q_len, embed_dim]
+            key: [B, K_len, embed_dim]
+            value: [B, V_len, embed_dim]
+        
+        Returns:
+            fused: [B, Q_len, embed_dim]
+        """
+        attn_output, _ = self.multihead_attn(query, key, value)  # attn_output: [B, Q_len, embed_dim]
+        attn_output = self.dropout(attn_output)
+        attn_output = self.norm(attn_output + query)  # Residual connection
+        fused = self.linear(attn_output)
+        return fused
+
+
 class LearnableTimeSeriesToImage(nn.Module):
     """
     Learnable module to convert time series data into image tensors.
@@ -330,6 +355,13 @@ class Model(nn.Module):
                 query_embedding_dim = 64,
                 hidden_dim = self.vilt_hidden_size,
                 num_heads = 4
+            )
+            
+            # Initialize AttentionFusion module
+            self.fusion_module = AttentionFusion(
+                embed_dim=self.vilt_hidden_size,
+                num_heads=4,
+                dropout=config.dropout
             )
             
             # Initialize TemporalProjection module
@@ -676,8 +708,10 @@ class Model(nn.Module):
                     print(f"Prompts len: {len(prompts)}")
                     raise e
             
-            fused_embeddings = torch.cat(embeddings_list, dim=0) 
-            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1) 
+            fused_embeddings = torch.cat(embeddings_list, dim=0)
+            # fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1) 
+            # fused_embeddings = self.fusion_module(query=text_vectors, key=fused_embeddings, value=fused_embeddings)
+            fused_embeddings = self.fusion_module(query=fused_embeddings, key=text_vectors, value=text_vectors)
             # Truncate or pad the output sequence length, as the model may output more or fewer tokens                    
             if fused_embeddings.shape[1] > self.vilt_fusion_len:
                 fused_embeddings = fused_embeddings[:, :self.vilt_fusion_len, :]
