@@ -1,12 +1,13 @@
 export TOKENIZERS_PARALLELISM=false
 model_name=TimeVLM
+vlm_type=vilt
 gpu=0
-image_size=224
+image_size=56
 predictor_hidden_dims=128
 periodicity=96
 norm_const=0.4
 three_channel_image=True
-finetune_clip=False
+finetune_vlm=False
 batch_size=32
 num_workers=32
 learning_rate=0.001
@@ -38,10 +39,11 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip \
+  --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
   --learning_rate $learning_rate \
-  --num_workers $num_workers
+  --num_workers $num_workers \
+  --vlm_type $vlm_type \
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -69,10 +71,11 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip \
+  --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
   --learning_rate $learning_rate \
-  --num_workers $num_workers
+  --num_workers $num_workers \
+  --vlm_type $vlm_type \
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -100,10 +103,11 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip \
+  --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
   --learning_rate $learning_rate \
-  --num_workers $num_workers
+  --num_workers $num_workers \
+  --vlm_type $vlm_type \
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -131,7 +135,8 @@ python -u run.py \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
-  --finetune_clip $finetune_clip \
+  --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
   --learning_rate $learning_rate \
-  --num_workers $num_workers
+  --num_workers $num_workers \
+  --vlm_type $vlm_type \
