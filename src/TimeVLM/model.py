@@ -199,12 +199,13 @@ class Model(nn.Module):
             self.clip_processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
             self.clip_model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
             
-            # Freeze CLIP model parameters
-            self._set_requires_grad(self.clip_model, False)
             if self.finetune_vlm:
                 # Unfreeze the last layers of CLIP's vision and text encoders
                 self._set_requires_grad(self.clip_model.vision_model.encoder.layers[-1], True)
                 self._set_requires_grad(self.clip_model.text_model.encoder.layers[-1], True)
+            else:
+                # Freeze CLIP model parameters
+                self._set_requires_grad(self.clip_model, False)
 
             # Print the total number of learnable parameters in CLIP
             if self.is_training:
@@ -254,8 +255,12 @@ class Model(nn.Module):
             self.blip2_processor = Blip2Processor.from_pretrained(BLIP_ARCH)
             self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
             
-            # Freeze BLIP2 model parameters
-            self._set_requires_grad(self.blip2_model, False)
+            if self.finetune_vlm:
+                # Unfreeze the BLIP2 model parameters
+                self._set_requires_grad(self.blip2_model, True)
+            else:
+                # Freeze BLIP2 model parameters
+                self._set_requires_grad(self.blip2_model, False)
             
             # Print the total number of learnable parameters in BLIP2
             if self.is_training:
@@ -304,19 +309,23 @@ class Model(nn.Module):
             self.vilt_processor = ViltProcessor.from_pretrained(VILT_ARCH)
             self.vilt_model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
             
-            # Freeze VILT model parameters
-            self._set_requires_grad(self.vilt_model, False)
-            # Unfreeze the last layer of the VILT encoder
             if self.finetune_vlm:
-                self._set_requires_grad(self.vilt_model.encoder.layer[-1], True)
+                # Unfreeze the VILT model parameters
+                self._set_requires_grad(self.vilt_model, True)
+                # Unfreeze the last layer of the VILT encoder
+                # self._set_requires_grad(self.vilt_model.encoder.layer[-1], True)
                 # Unfreeze the last two layers of the VILT encoder
                 # for layer in self.vilt_model.encoder.layer[-2:]:
                 #     self._set_requires_grad(layer, True)
+            else:
+                # Freeze VILT model parameters
+                self._set_requires_grad(self.vilt_model, False)
         
             # Print the total number of learnable parameters in VILT
             if self.is_training:
                 learnable_params = sum(p.numel() for p in self.vilt_model.parameters() if p.requires_grad)
                 print(f"ViLT Learnable model parameters: {learnable_params}")
+                # self._print_learnable_parameters(self.vilt_model)
             
             self.detail_prompt = False
             self.vlm_max_text_input_length = 40
@@ -357,7 +366,14 @@ class Model(nn.Module):
         else:
             raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2'].")
 
-
+    @staticmethod
+    def _print_learnable_parameters(model, prefix=""):
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(f"{prefix}{name}")
+        for name, child in model.named_children():
+            Model._print_learnable_parameters(child, prefix=f"{prefix}{name}.")
+        
     @staticmethod
     def _set_requires_grad(model: nn.Module, value: bool):
         """
@@ -596,14 +612,12 @@ class Model(nn.Module):
             try:
                 # Process images using CLIP's processor and model
                 processed_images = self.clip_processor(images=images, return_tensors="pt")["pixel_values"].to(device)
-                with torch.no_grad():
-                    image_embeddings = self.clip_model.get_image_features(processed_images)  # Shape: [B * nvars, 512]
+                image_embeddings = self.clip_model.get_image_features(processed_images)  # Shape: [B * nvars, 512]
                     
                 # Process text prompts using CLIP's processor and model
                 all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
                 text_encodings = self.clip_processor(text=all_text_prompts, return_tensors="pt", padding=True).to(device)
-                with torch.no_grad():
-                    text_embeddings = self.clip_model.get_text_features(**text_encodings)  # Shape: [B * 2, 512]
+                text_embeddings = self.clip_model.get_text_features(**text_encodings)  # Shape: [B * 2, 512]
                     
             except Exception as e:
                 print(f"Error processing data: {e}")
@@ -632,8 +646,7 @@ class Model(nn.Module):
                 try:
                     # Process images and text prompts using BLIP2's processor and model
                     encoding = self.blip2_processor(images=batch_images, text=batch_prompts, return_tensors="pt", padding=True).to(device)
-                    with torch.no_grad():
-                        blip2_outputs = self.blip2_model(**encoding, output_hidden_states=True) # blip2_model.keys() — odict_keys(['logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
+                    blip2_outputs = self.blip2_model(**encoding, output_hidden_states=True) # blip2_model.keys() — odict_keys(['logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
                     
                     # Extract the last hidden states from the language model
                     llm_outputs = blip2_outputs.language_model_outputs.hidden_states[-1]
@@ -671,8 +684,7 @@ class Model(nn.Module):
 
                 try:
                     encoding = self.vilt_processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(device)
-                    with torch.no_grad():
-                        vilt_outputs = self.vilt_model(**encoding, output_hidden_states=True)
+                    vilt_outputs = self.vilt_model(**encoding, output_hidden_states=True)
                     vilt_outputs = vilt_outputs.hidden_states[-1]
                     embeddings_list.append(vilt_outputs)
                                     
