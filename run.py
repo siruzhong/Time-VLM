@@ -153,9 +153,10 @@ if __name__ == '__main__':
     parser.add_argument('--wo_ts', type=int, default=0, help='without/with Time Series Data 1/0')
     
     # zero-shot forecasting
-    parser.add_argument('--pretrained_model_path', type=str, default=None, help='pretrained model path')
-    parser.add_argument('--target_data', type=str, default='ETTh2', help='dataset type')
-    
+    parser.add_argument('--target_data', type=str, default='ETTh2', help='target dataset type')
+    parser.add_argument('--target_root_path', type=str, default='./data/ETT/', help='root path of the target data file')
+    parser.add_argument('--target_data_path', type=str, default='ETTh2.csv', help='target data file')
+        
     args = parser.parse_args()
     args.use_gpu = True if torch.cuda.is_available() else False
 
@@ -167,6 +168,10 @@ if __name__ == '__main__':
         args.gpu = args.device_ids[0]
 
     args.content = load_content(args)
+    
+    # print arguments
+    print_args(args)
+    print_hyperparameters(args)
 
     if args.task_name == 'long_term_forecast':
         Exp = Exp_Long_Term_Forecast
@@ -185,10 +190,6 @@ if __name__ == '__main__':
 
     # training mode
     if args.is_training:
-        # print arguments
-        print_args(args)
-        print_hyperparameters(args)
-        
         # run experiments
         for ii in range(args.itr):
             exp = Exp(args)
@@ -244,12 +245,7 @@ if __name__ == '__main__':
             args.distil,
             args.des, ii)
      
-        if args.task_name == 'zero_shot_forecast':
-            print(f"[Zero-Shot] Source data: {args.data}, Target data: {args.target_data}, Test prediction length: {args.pred_len}")
-            print(f"Loading pretrained model from: {args.pretrained_model_path}")
-            exp.test(setting)
-        else:
-            print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
-            exp.test(setting, test=1)
+        print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
+        exp.test(setting, test=1)
         
         torch.cuda.empty_cache()
