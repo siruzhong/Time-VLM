@@ -325,12 +325,11 @@ class Model(nn.Module):
             if self.is_training:
                 learnable_params = sum(p.numel() for p in self.vilt_model.parameters() if p.requires_grad)
                 print(f"ViLT Learnable model parameters: {learnable_params}")
-                # self._print_learnable_parameters(self.vilt_model)
             
             self.detail_prompt = False
             self.vlm_max_text_input_length = 40
             self.vilt_hidden_size = 768
-            self.vilt_fusion_len = 190
+            self.vilt_fusion_len = 192  # Must be divisible by num_heads
             
             # Initialize SequenceProjection module
             self.sequence_projection = nn.Sequential(
@@ -558,7 +557,7 @@ class Model(nn.Module):
         return images
 
     @torch.no_grad()
-    def save_images(self, images, batch_idx):
+    def save_images(self, images):
         """
         Save the generated images.
 
@@ -572,7 +571,7 @@ class Model(nn.Module):
             img_tensor = img_tensor.cpu().numpy().transpose(1, 2, 0) * 255  # Convert to [H, W, C] and scale to [0, 255]
             img_tensor = img_tensor.astype(np.uint8)
             img = Image.fromarray(img_tensor)
-            img.save(os.path.join(save_dir, f"image_{batch_idx}_{i}.png"))
+            img.save(os.path.join(save_dir, f"image_{i}.png"))
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
         """
