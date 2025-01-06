@@ -14,138 +14,14 @@ from pytorch_wavelets import DWTForward
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from layers.Embed import PatchEmbedding
+from layers.Temporal_Projection import TemporalProjection
+from layers.Flatten_Head import FlattenHead
+from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage
+from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
 from layers.models_mae import *
 from transformers.models.vilt import *
 
 
-class LearnableTimeSeriesToImage(nn.Module):
-    """
-    Learnable module to convert time series data into image tensors.
-    """
-    def __init__(self, input_dim, hidden_dim, output_channels, image_size, periodicity):
-        super(LearnableTimeSeriesToImage, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_channels = output_channels
-        self.image_size = image_size
-        self.periodicity = periodicity
-
-        # 1D convolutional layer, used to transform [B, L, D] to [B, hidden_dim, L]
-        self.conv1d = nn.Conv1d(in_channels=input_dim, out_channels=hidden_dim, kernel_size=3, padding=1)
-
-        # 2D convolution layer, used to convert [B, hidden_dim, L] to [B, C, H, W]
-        self.conv2d_1 = nn.Conv2d(in_channels=hidden_dim, out_channels=hidden_dim // 2, kernel_size=3, padding=1)
-        self.conv2d_2 = nn.Conv2d(in_channels=hidden_dim // 2, out_channels=output_channels, kernel_size=3, padding=1)
-
-
-    def forward(self, x_enc):
-        """
-        Convert the input time series data into an image tensor.
-
-        Args:
-            x_enc (torch.Tensor): Input time series data, shape of [batch_size, seq_len, n_vars]
-
-        Returns:
-            torch.Tensor: Image tensor, shape of [B, output_channels, H, W]
-        """
-        B, L, D = x_enc.shape
-        
-        # Generate periodicity encoding using sin and cos functions
-        time_steps = torch.arange(L, dtype=torch.float32).unsqueeze(0).repeat(B, 1).to(x_enc.device)  # shape [B, L]
-        
-        # Generate sin and cos components and ensure shape is [B, L, 2]
-        periodicity_encoding = torch.cat([
-            torch.sin(time_steps / self.periodicity * (2 * torch.pi)).unsqueeze(-1),
-            torch.cos(time_steps / self.periodicity * (2 * torch.pi)).unsqueeze(-1)
-        ], dim=-1)  # shape [B, L, 2], periodicity encoding
-        
-        # Repeat periodicity encoding across the feature dimension
-        periodicity_encoding = periodicity_encoding.unsqueeze(-2).repeat(1, 1, D, 1)  # shape [B, L, D, 2]
-        
-        # Concatenate the periodicity encoding for each variable to its corresponding time series data
-        x_enc = x_enc.unsqueeze(-1)  # shape [B, L, D, 1]
-        x_enc = torch.cat([x_enc, periodicity_encoding], dim=-1)  # shape [B, L, D, 3]
-
-        # Reshape the input to [B * D, 3, L] for the 1D convolution layer
-        x_enc = x_enc.view(B * D, 3, L)
-
-        # adjust D to hidden_dim
-        x_enc = self.conv1d(x_enc)
-
-        # add channel dimension for 2D convolution to [B, hidden_dim, 1, L]
-        x_enc = x_enc.unsqueeze(2)
-
-        # 2D Convolution to convert [B, hidden_dim, 1, L] to [B, output_channels, 1, L]
-        x_enc = F.relu(self.conv2d_1(x_enc))
-        x_enc = F.relu(self.conv2d_2(x_enc))
-        
-        # Interpolate to the desired image size to get [B, output_channels, H, W]
-        x_enc = F.interpolate(x_enc, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
-        
-        # Reshape the output to [B * n_vars, output_channels, H, W]
-        x_enc = x_enc.view(B * D, self.output_channels, self.image_size, self.image_size)
-        
-        return x_enc
-
-
-class QueryTimeSeriesInteraction(nn.Module):
-    """
-    Query-Time Series Interaction module for multimodal fusion.
-    """
-    def __init__(self, num_queries, time_series_embedding_dim, query_embedding_dim, hidden_dim, num_heads):
-        super(QueryTimeSeriesInteraction, self).__init__()
-        
-        self.num_queries = num_queries
-        self.time_series_embedding_dim = time_series_embedding_dim
-        self.query_embedding_dim = query_embedding_dim
-        self.hidden_dim = hidden_dim
-        self.num_heads = num_heads
-
-        # Learnable query vectors, shape [num_queries, query_embedding_dim]
-        self.query_embeddings = nn.Parameter(torch.randn(num_queries, query_embedding_dim))
-        
-        # A linear layer to encode time-series embeddings into query_embedding_dim
-        self.time_series_encoder = nn.Linear(time_series_embedding_dim, query_embedding_dim)
-
-        # Multi-head attention for query-time series interaction
-        self.multihead_attention = nn.MultiheadAttention(query_embedding_dim, num_heads, batch_first=True)
-
-        # A linear layer to further transform the pooled result into a text-like hidden dimension
-        self.text_vector_generator = nn.Linear(query_embedding_dim, hidden_dim)
-
-    def forward(self, x_enc, patch_embedding):
-        """
-        Forward pass for the QueryTimeSeriesInteraction.
-
-        Args:
-            x_enc (torch.Tensor): shape [batch_size, seq_len, n_vars].
-            patch_embedding (torch.Tensor): shape [[batch_size*n_vars, num_patches, d_model].
-
-        Returns:
-            torch.Tensor: A text-like vector representation of shape [batch_size, hidden_dim].
-        """
-        B, L, D = x_enc.shape
-        time_series_embeddings = patch_embedding.view(B, D, -1, patch_embedding.shape[-1])  # [batch_size, n_vars, num_patches, d_model]
-        time_series_embeddings = time_series_embeddings.view(B, -1, time_series_embeddings.shape[-1])   # [batch_size, (n_vars * num_patches), d_model]
-
-        # Encode the time-series to match the query dimension: [batch_size, (n_vars * num_patches), query_dim]
-        encoded_time_series = self.time_series_encoder(time_series_embeddings)
-
-        # Expand the learnable query vectors for each batch, resulting in [batch_size, num_queries, query_dim]
-        queries = self.query_embeddings.unsqueeze(0).repeat(B, 1, 1)
-
-        # Apply multi-head attention, shape: [batch_size, num_queries, query_dim]
-        interaction_output, _ = self.multihead_attention(queries, encoded_time_series, encoded_time_series)
-
-        # Pool across the query dimension, e.g., mean pooling, shape: [B, query_dim]
-        pooled_output = interaction_output.mean(dim=1)
-
-        # Generate the final text-like vector, shape: [B, hidden_dim]
-        text_vectors = self.text_vector_generator(pooled_output)
-                
-        return text_vectors.unsqueeze(1)
-    
-    
 class Model(nn.Module):
     """
     Multimodal Time Series Prediction Model based on CLIP.
@@ -754,20 +630,6 @@ class Model(nn.Module):
         return y
 
 
-def test_tensor(tensor):
-    """
-    Utility function to print tensor statistics for debugging.
-    """
-    print("Shape:", tensor.shape)
-    print("Average:", tensor.mean().item())
-    print("Std Dev:", tensor.std().item())
-    print("Min:", tensor.min().item())
-    print("Max:", tensor.max().item())
-    print("Contains NaN:", torch.isnan(tensor).any().item())
-    print("Contains Inf:", torch.isinf(tensor).any().item())
-    print("Gradient:", tensor.grad)
-
-
 def check_image_channel(np_img):
     """
     Check the number of channels in an image and adjust the dimension order.
@@ -792,54 +654,3 @@ def check_image_channel(np_img):
         print(f"Unexpected number of channels: {np_img.shape[0]} for image")
 
     return np_img, mode
-
-
-def test_cuda_memory(device):
-    """
-    Test CUDA memory usage.
-
-    Args:
-    - device: CUDA device.
-    """
-    print(torch.cuda.memory_summary(device=device, abbreviated=False))
-    max_memory = torch.cuda.max_memory_allocated()
-    print(f"Max memory allocated: {max_memory / (1024 ** 3):.2f} GB")
-    # Force garbage collection
-    gc.collect()
-
-
-class TemporalProjection(nn.Module):
-    def __init__(self, fusion_dim, d_model, pred_len, nhead=8, dropout=0.1):
-        super().__init__()
-        # Temporal Feature Extraction
-        self.conv_block = nn.Sequential(
-            nn.Conv1d(fusion_dim, fusion_dim*2, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(fusion_dim*2, pred_len, kernel_size=3, padding=1)
-        )
-        # Self-Attention Layer
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.norm = nn.LayerNorm(d_model)
-        
-    def forward(self, x):  # x: [B, FD, d_model]
-        conv_out = self.conv_block(x)  # [B, FD, d_model] => [B, FD, d_model]
-        attn_in = self.norm(conv_out)
-        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [B, d_model, pred_len] 
-        out = self.norm(attn_out)
-        return out
-
-
-class FlattenHead(nn.Module):
-    def __init__(self, n_vars, nf, target_window, head_dropout=0):
-        super().__init__()
-        self.n_vars = n_vars
-        self.flatten = nn.Flatten(start_dim=-2)
-        self.linear = nn.Linear(nf, target_window)
-        self.dropout = nn.Dropout(head_dropout)
-
-    def forward(self, x):  # x: [bs x nvars x d_model x patch_num]
-        x = self.flatten(x)
-        x = self.linear(x)
-        x = self.dropout(x)
-        return x
