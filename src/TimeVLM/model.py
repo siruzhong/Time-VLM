@@ -1,6 +1,5 @@
 import os
 import sys
-import gc
 import numpy as np
 import torch
 import torch.nn as nn
@@ -22,6 +21,125 @@ from layers.models_mae import *
 from transformers.models.vilt import *
 
 
+class VLMManager:
+    """
+    Manager class to handle different VLM types (CLIP, BLIP2, ViLT).
+    """
+    def __init__(self, config):
+        self.config = config
+        self.vlm_type = config.vlm_type.lower()
+        self.device = self._acquire_device()
+        self._init_vlm()
+        
+    def _acquire_device(self):
+        if self.config.use_gpu and torch.cuda.is_available():
+            device = torch.device(f'cuda:{self.config.gpu}')
+        else:
+            device = torch.device('cpu')
+            print('Use CPU')
+        return device
+
+    def _init_vlm(self):
+        if self.vlm_type == "clip":
+            self._init_clip()
+        elif self.vlm_type == "blip2":
+            self._init_blip2()
+        elif self.vlm_type == "vilt":
+            self._init_vilt()
+        else:
+            raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt'].")
+        self.model.to(self.device)
+        learnable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print(f"VLM Learnable model parameters: {learnable_params}")
+
+    def _init_clip(self):
+        CLIP_ARCH = 'openai/clip-vit-base-patch32'
+        self.processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
+        self.model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
+        self._set_requires_grad(self.model, self.config.finetune_vlm)
+        self.hidden_size = 512
+        self.fusion_dim = self.config.c_out + 3
+        self.detail_prompt = False
+        self.max_input_text_length = 77
+
+    def _init_blip2(self):
+        BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
+        self.processor = Blip2Processor.from_pretrained(BLIP_ARCH)
+        self.model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
+        self._set_requires_grad(self.model, self.config.finetune_vlm)
+        self.hidden_size = 2560
+        self.fusion_dim = 256  # output length of the LLM in BLIP-2
+        self.detail_prompt = True
+
+    def _init_vilt(self):
+        VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
+        self.processor = ViltProcessor.from_pretrained(VILT_ARCH)
+        self.model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
+        self._set_requires_grad(self.model, self.config.finetune_vlm)
+        self.hidden_size = 768
+        self.fusion_dim = 192
+        self.detail_prompt = False
+        self.max_input_text_length = 40
+
+    def _set_requires_grad(self, model, value):
+        for param in model.parameters():
+            param.requires_grad = value
+        for child in model.children():
+            self._set_requires_grad(child, value)
+
+    def process_inputs(self, B, images, prompts):
+        try: 
+            if self.vlm_type == "clip":
+                return self._process_clip_inputs(B, images, prompts)
+            elif self.vlm_type == "blip2":
+                return self._process_blip2_inputs(B, images, prompts)
+            elif self.vlm_type == "vilt":
+                return self._process_vilt_inputs(B, images, prompts)
+        except Exception as e:
+            print(f"Error processing inputs: {e}")
+            print(f"Images shape: {images.shape}")
+            print(f"Prompts: {prompts}")
+            raise e
+
+    def _process_clip_inputs(self, B, images, prompts):
+        assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
+        processed_images = self.processor(images=images, return_tensors="pt")["pixel_values"].to(self.device)
+        image_embeddings = self.model.get_image_features(processed_images)
+        all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
+        text_encodings = self.processor(text=all_text_prompts, return_tensors="pt", padding=True).to(self.device)
+        text_embeddings = self.model.get_text_features(**text_encodings)
+        # Reshape embeddings to [B, n_prompts, embedding_dim]
+        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, 512]
+        image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, 512]
+        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 + nvars, 512]
+        return fused_embeddings
+
+    def _process_blip2_inputs(self, B, images, prompts):
+        sub_batch_size = 32
+        embeddings_list = []  # Store embeddings for each batch
+        for i in range(0, B, sub_batch_size):
+            end_idx = min(i + sub_batch_size, B)
+            batch_images = images[i:end_idx]
+            encoding = self.processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(self.device)
+            outputs = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]
+            embeddings_list.append(outputs)
+        fused_embeddings = torch.cat(embeddings_list, dim=0)            
+        return fused_embeddings
+    
+    def _process_vilt_inputs(self, B, images, prompts):
+        assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
+        sub_batch_size = 32
+        embeddings_list = []  # Store embeddings for each batch
+        for i in range(0, B, sub_batch_size):
+            end_idx = min(i + sub_batch_size, B)
+            batch_images = images[i:end_idx]
+            encoding = self.processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(self.device)
+            outputs = self.model(**encoding, output_hidden_states=True).hidden_states[-1]
+            embeddings_list.append(outputs)
+        fused_embeddings = torch.cat(embeddings_list, dim=0)            
+        return fused_embeddings
+
+
 class Model(nn.Module):
     """
     Multimodal Time Series Prediction Model based on CLIP.
@@ -30,252 +148,81 @@ class Model(nn.Module):
     def __init__(self, config, **kwargs):
         super(Model, self).__init__()
         self.config = config
-        self.vlm_type = config.vlm_type.lower() 
-        self.finetune_vlm = config.finetune_vlm
-        self.task_name = config.task_name
-        self.pred_len = config.pred_len
-        self.seq_len = config.seq_len
-        self.description = config.content
-        self.periodicity = config.periodicity
-        self.image_size = config.image_size
-        self.three_channel_image = config.three_channel_image
-        self.save_images_flag = False  # Set to True to save generated images
-        self.norm_const = config.norm_const
-        self.predictor_hidden_dims = config.predictor_hidden_dims  # MLP predictor hidden layer dimensions
-        self.vlm_max_text_input_length = 77  # Maximum input length for the VLM
-        self.is_training = config.is_training
-        self.learnable_image_module_flag = True
-        self.d_model = config.d_model
+        self.vlm_manager = VLMManager(config)
+        self._init_modules(config)
+        self.vlm_model = self.vlm_manager.model
 
-        # Initialize patch embedding
+    def _init_modules(self, config):
         self.patch_embedding = PatchEmbedding(config.d_model, config.patch_len, config.stride, config.padding, config.dropout)
         self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
-        self.temporal_head = FlattenHead(
-            config.enc_in, 
-            self.head_nf, 
-            config.pred_len, 
-            head_dropout=config.dropout
-        )
-        
-        # Initialize wavelet transform
+        self.temporal_head = FlattenHead(config.enc_in, self.head_nf, config.pred_len, head_dropout=config.dropout)
         self.dwt = DWTForward(J=1, wave='haar')
-        
-        # Initialize learnable time series to image module
         self.learnable_image_module = LearnableTimeSeriesToImage(
-            input_dim=3, # Adjusted for periodicity encoding
-            hidden_dim=48,
-            output_channels=3 if self.three_channel_image else 1,
-            image_size=self.image_size,
-            periodicity=self.periodicity
+            input_dim=3, hidden_dim=48, output_channels=3 if config.three_channel_image else 1,
+            image_size=config.image_size, periodicity=config.periodicity
         )
+        self.query_time_series_interaction = QueryTimeSeriesInteraction(
+            num_queries=8, time_series_embedding_dim=config.d_model, query_embedding_dim=64,
+            hidden_dim=self.vlm_manager.hidden_size, num_heads=4
+        )
+        self.temporal_projection = TemporalProjection(
+            fusion_dim=self.vlm_manager.fusion_dim, d_model=self.vlm_manager.hidden_size,
+            pred_len=config.pred_len, dropout=config.dropout
+        )
+        self.predictor = nn.Sequential(
+            nn.Linear(self.vlm_manager.hidden_size, config.predictor_hidden_dims),
+            nn.ReLU(),
+            nn.Dropout(config.dropout),
+            nn.Linear(config.predictor_hidden_dims, config.c_out)
+        )
+
+    def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
+        B, L, D = x_enc.shape
+        device = x_enc.device
         
-        if self.vlm_type == "clip":
-            # Initialize CLIP processor and model
-            CLIP_ARCH = 'openai/clip-vit-base-patch32'
-            self.clip_processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
-            self.clip_model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
-            
-            if self.finetune_vlm:
-                # Unfreeze the last layers of CLIP's vision and text encoders
-                self._set_requires_grad(self.clip_model.vision_model.encoder.layers[-1], True)
-                self._set_requires_grad(self.clip_model.text_model.encoder.layers[-1], True)
-            else:
-                # Freeze CLIP model parameters
-                self._set_requires_grad(self.clip_model, False)
+        x_enc, means, stdev = self._normalize_input(x_enc)
+        patchs, _ = self.patch_embedding(x_enc.transpose(1, 2))
 
-            # Print the total number of learnable parameters in CLIP
-            if self.is_training:
-                learnable_params = sum(p.numel() for p in self.clip_model.parameters() if p.requires_grad)
-                print(f"CLIP Learnable model parameters: {learnable_params}")
-            
-            # Set CLIP hidden size and fusion length
-            self.detail_prompt = False  # Set to True to include dataset description in the prompt
-            self.vlm_max_text_input_length = 77
-            self.clip_hidden_size = 512  # CLIP hidden size (for clip-vit-base-patch32)
-            self.clip_fusion_len = config.c_out + 3  # CLIP fusion hidden layer dimensions
+        images = self.time_series_to_image(x_enc, self.config.seq_len, self.config.periodicity)
+        prompts = self.generate_time_series_prompt(x_enc, self.config.content, self.config.pred_len, self.config.seq_len)
 
-            # Initialize SequenceProjection module (Optional)
-            self.sequence_projection = nn.Sequential(
-                nn.Linear(self.clip_fusion_len, self.pred_len),
-                nn.ReLU()
-            )
-            
-            # Initialize learnable time series to text module
-            self.query_time_series_interaction = QueryTimeSeriesInteraction(
-                num_queries = 8, 
-                time_series_embedding_dim = self.d_model,
-                query_embedding_dim = 64,
-                hidden_dim = self.clip_hidden_size,
-                num_heads = 4
-            )
+        text_vectors = self.query_time_series_interaction(x_enc, patchs)
+        fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)
+        fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)
 
-            # Initialize TemporalProjection module
-            self.temporal_projection = TemporalProjection(
-                fusion_dim=self.clip_fusion_len,
-                d_model=self.clip_hidden_size,
-                pred_len=self.pred_len,
-                dropout=config.dropout
-            )
-            
-            # Initialize MLP predictor
-            self.predictor = nn.Sequential(
-                nn.Linear(self.clip_hidden_size, self.predictor_hidden_dims),
-                nn.ReLU(),
-                nn.Dropout(config.dropout),
-                nn.Linear(self.predictor_hidden_dims, config.c_out)
-            )
-            
-        elif self.vlm_type == "blip2":
-            # Initialize the BLIP2 processor and model for extracting image and text features
-            BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
-            self.blip2_processor = Blip2Processor.from_pretrained(BLIP_ARCH)
-            self.blip2_model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
-            
-            if self.finetune_vlm:
-                # Unfreeze the BLIP2 model parameters
-                self._set_requires_grad(self.blip2_model, True)
-            else:
-                # Freeze BLIP2 model parameters
-                self._set_requires_grad(self.blip2_model, False)
-            
-            # Print the total number of learnable parameters in BLIP2
-            if self.is_training:
-                learnable_params = sum(p.numel() for p in self.blip2_model.parameters() if p.requires_grad)
-                print(f"BLIP2 Learnable model parameters: {learnable_params}")
-            
-            # Set BLIP2 hidden size and fusion length
-            self.detail_prompt = True
-            self.blip2_hidden_size = 2560   # BLIP-2 hidden size
-            self.llm_output_len = config.llm_output_len  # LLM output sequence length
-            
-            # Initialize SequenceProjection module
-            self.sequence_projection = nn.Sequential(
-                nn.Linear(self.llm_output_len, self.pred_len),
-                nn.ReLU()
-            )
-            
-            # Initialize learnable time series to text module
-            self.query_time_series_interaction = QueryTimeSeriesInteraction(
-                num_queries = 8, 
-                time_series_embedding_dim = self.d_model,
-                query_embedding_dim = 64,
-                hidden_dim = self.llm_output_len,
-                num_heads = 4
-            )
-            
-            # Initialize TemporalProjection module
-            self.temporal_projection = TemporalProjection(
-                fusion_dim=self.llm_output_len,
-                d_model=self.blip2_hidden_size,
-                pred_len=self.pred_len,
-                dropout=config.dropout
-            )
-            
-            # Initialize MLP predictor
-            self.predictor = nn.Sequential(
-                nn.Linear(self.blip2_hidden_size, self.predictor_hidden_dims),
-                nn.ReLU(),
-                nn.Dropout(config.dropout),
-                nn.Linear(self.predictor_hidden_dims, config.c_out)
-            )
-            
-        elif self.vlm_type == "vilt":
-            # Initialize VILT processor and model
-            VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
-            self.vilt_processor = ViltProcessor.from_pretrained(VILT_ARCH)
-            self.vilt_model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
-            
-            if self.finetune_vlm:
-                # Unfreeze the VILT model parameters
-                self._set_requires_grad(self.vilt_model, True)
-                # Unfreeze the last layer of the VILT encoder
-                # self._set_requires_grad(self.vilt_model.encoder.layer[-1], True)
-                # Unfreeze the last two layers of the VILT encoder
-                # for layer in self.vilt_model.encoder.layer[-2:]:
-                #     self._set_requires_grad(layer, True)
-            else:
-                # Freeze VILT model parameters
-                self._set_requires_grad(self.vilt_model, False)
+        # Ensure the fused embeddings have the correct dimension
+        if fused_embeddings.shape[1] > self.vlm_manager.fusion_dim:
+            fused_embeddings = fused_embeddings[:, :self.vlm_manager.fusion_dim, :]
+        elif fused_embeddings.shape[1] < self.vlm_manager.fusion_dim:
+            repeat_times = -(-self.vlm_manager.fusion_dim // fused_embeddings.shape[1])
+            fused_embeddings = fused_embeddings.repeat(1, repeat_times, 1)[:, :self.vlm_manager.fusion_dim, :]
         
-            # Print the total number of learnable parameters in VILT
-            if self.is_training:
-                learnable_params = sum(p.numel() for p in self.vilt_model.parameters() if p.requires_grad)
-                print(f"ViLT Learnable model parameters: {learnable_params}")
-            
-            self.detail_prompt = False
-            self.vlm_max_text_input_length = 40
-            self.vilt_hidden_size = 768
-            self.vilt_fusion_len = 192  # Must be divisible by num_heads
-            
-            # Initialize SequenceProjection module
-            self.sequence_projection = nn.Sequential(
-                nn.Linear(self.vilt_fusion_len, self.pred_len),
-                nn.ReLU()
-            )
-            
-            # Initialize learnable time series to text module
-            self.query_time_series_interaction = QueryTimeSeriesInteraction(
-                num_queries = 8, 
-                time_series_embedding_dim = self.d_model,
-                query_embedding_dim = 64,
-                hidden_dim = self.vilt_hidden_size,
-                num_heads = 4
-            )
-            
-            # Initialize TemporalProjection module
-            self.temporal_projection = TemporalProjection(
-                fusion_dim=self.vilt_fusion_len,
-                d_model=self.vilt_hidden_size,
-                pred_len=self.pred_len,
-                dropout=config.dropout
-            )
-            
-            # Initialize MLP predictor
-            self.predictor = nn.Sequential(
-                nn.Linear(self.vilt_hidden_size, self.predictor_hidden_dims),
-                nn.ReLU(),
-                nn.Dropout(config.dropout),
-                nn.Linear(self.predictor_hidden_dims, config.c_out)
-            )
-            
-        else:
-            raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2'].")
+        fused_projected = self.temporal_projection(fused_embeddings)
+        predictions = self.predictor(fused_projected)
 
-    @staticmethod
-    def _print_learnable_parameters(model, prefix=""):
-        for name, param in model.named_parameters():
-            if param.requires_grad:
-                print(f"{prefix}{name}")
-        for name, child in model.named_children():
-            Model._print_learnable_parameters(child, prefix=f"{prefix}{name}.")
-        
-    @staticmethod
-    def _set_requires_grad(model: nn.Module, value: bool):
-        """
-        Recursively set requires_grad for all parameters in a model.
+        supplementary_features = self.temporal_head(patchs)
+        supplementary_features = einops.rearrange(supplementary_features, '(b n) d -> b d n', b=B)
+        predictions += supplementary_features
 
-        Args:
-            model (nn.Module): The model or submodule.
-            value (bool): Whether to set requires_grad.
-        """
-        for param in model.parameters():
-            param.requires_grad = value
-        for child in model.children():
-            Model._set_requires_grad(child, value)
-            
+        y = self._denormalize_output(predictions, means, stdev)
+        return y
+
+    def _normalize_input(self, x):
+        means = x.mean(1, keepdim=True).detach()
+        x = x - means
+        stdev = torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)
+        stdev /= self.config.norm_const
+        x = x / stdev
+        return x, means, stdev
+
+    def _denormalize_output(self, y, means, stdev):
+        y = y * (stdev.repeat(1, self.config.pred_len, 1))
+        y = y + (means.repeat(1, self.config.pred_len, 1))
+        return y
+
     def generate_time_series_prompt(self, x_enc, description, pred_len, seq_len, top_k=5):
         """
         Generate text prompts for the language model based on time series data.
-
-        Args:
-        - x_enc: Time series data tensor with shape [B, T, d_model].
-        - description: Description information of the dataset.
-        - pred_len: Prediction length.
-        - seq_len: Input sequence length.
-        - top_k: Number of lag indicators, default is 5.
-        
-        Returns:
-        - prompts: A list containing the generated text prompts for each batch.
         """
         def calculate_lags(x_enc, top_k):
             """
@@ -312,7 +259,7 @@ class Model(nn.Module):
             lags_values_str = str(lags[b].tolist())
             trend_direction = "upward" if trends[b].mean() > 0 else "downward"  # Determine the overall trend direction using the mean of the trend
             
-            if self.detail_prompt:
+            if self.vlm_manager.detail_prompt:
                 dataset_part = f"Dataset: {description}."
                 task_part = f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information."
                 stats_part = f"Input statistics: min value {min_values_str}, max value {max_values_str}, median value {median_values_str}, the trend of input is {trend_direction}, top {top_k} lags are : {lags_values_str}"
@@ -321,9 +268,9 @@ class Model(nn.Module):
                 prompts.append(prompt)
             else:
                 image_part = f"{seq_len}-time-step img, predict {pred_len} steps."
-                image_part = image_part[:self.vlm_max_text_input_length] if len(image_part) > self.vlm_max_text_input_length else image_part
+                image_part = image_part[:self.vlm_manager.max_input_text_length] if len(image_part) > self.vlm_manager.max_input_text_length else image_part
                 stats_part = (f"Stats: range={float(min_values_str):.6f}~{float(max_values_str):.6f}, trend={trend_direction}, lags={lags_values_str}.")
-                stats_part = stats_part[:self.vlm_max_text_input_length] if len(stats_part) > self.vlm_max_text_input_length else stats_part
+                stats_part = stats_part[:self.vlm_manager.max_input_text_length] if len(stats_part) > self.vlm_manager.max_input_text_length else stats_part
                 prompts.append([image_part, stats_part])
 
         return prompts
@@ -331,24 +278,13 @@ class Model(nn.Module):
     def time_series_to_image(self, x_enc, context_len, periodicity):
         """
         Convert time series data into 3-channel image tensors.
-
-        Args:
-            x_enc (torch.Tensor): Input time series data of shape [B, context_len, nvars].
-            context_len (int): Context length of the time series.
-            periodicity (int): Periodicity for segmenting the time series.
-
-        Returns:
-            torch.Tensor: Image tensors of shape [B * nvars, 3, image_size, image_size].
         """
-        
-        if self.learnable_image_module_flag:
-            # Use learnable module to convert time series to image
+        if self.config.learnable_image:
             images = self.learnable_image_module(x_enc)
-        
         else:
             # Adjust padding to make context_len a multiple of periodicity
             pad_left = 0
-            if context_len % periodicity!= 0:
+            if context_len % periodicity != 0:
                 pad_left = periodicity - context_len % periodicity
 
             # Rearrange to [B, nvars, seq_len]
@@ -361,18 +297,18 @@ class Model(nn.Module):
             x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=periodicity)
             
             # Resize the time series data
-            x_resized_2d = F.interpolate(x_2d, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)  # Shape: [B * nvars, 1, image_size, image_size]
+            x_resized_2d = F.interpolate(x_2d, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
 
             # Convert to 3-channel image
-            if self.three_channel_image:
+            if self.config.three_channel_image:
                 # Apply Fourier transform or wavelet transform
                 x_fft = self._apply_fourier_transform(x_2d)
                 x_wavelet = self._apply_wavelet_transform(x_2d)
                 # Resize the Fourier or wavelet transformed data as image input using interpolation
-                x_resized_fft = F.interpolate(x_fft, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False) # [b*n, 1, image_size, image_size]
-                x_resized_wavelet = F.interpolate(x_wavelet, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False) # [b*n, 1, image_size, image_size]
+                x_resized_fft = F.interpolate(x_fft, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
+                x_resized_wavelet = F.interpolate(x_wavelet, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
                 # Concatenate along the channel dimension to form a 3-channel image
-                images = torch.concat([x_resized_2d, x_resized_fft, x_resized_wavelet], dim=1)  # [b*n, 3, h, w]
+                images = torch.concat([x_resized_2d, x_resized_fft, x_resized_wavelet], dim=1)  # [B * nvars, 3, H, W]
             else:
                 # Repeat the single channel to create a 3-channel image
                 images = einops.repeat(x_resized_2d, 'b 1 h w -> b c h w', c=3)
@@ -381,7 +317,7 @@ class Model(nn.Module):
         images = self._normalize_images(images)
         
         # Optionally save images
-        if self.save_images_flag:
+        if self.config.save_images:
             self.save_images(images)
 
         return images
@@ -448,186 +384,6 @@ class Model(nn.Module):
             img_tensor = img_tensor.astype(np.uint8)
             img = Image.fromarray(img_tensor)
             img.save(os.path.join(save_dir, f"image_{i}.png"))
-
-    def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
-        """
-        Forward pass of the model.
-
-        Args:
-        - x_enc: Input time series data with shape [batch_size, seq_len, n_vars].
-
-        Returns:
-        - torch.Tensor: Prediction results of shape [batch_size, pred_len, c_out].
-        """
-        B, L, D = x_enc.shape
-        device = x_enc.device
-
-        # Normalize the input data
-        x_enc, means, stdev = self._normalize_input(x_enc)
-        patchs, _ = self.patch_embedding(x_enc.transpose(1, 2)) # [batch_size*n_vars, num_patches, d_model]
-
-        # 1. Convert time series data to images
-        images = self.time_series_to_image(x_enc, self.seq_len, self.periodicity)  # Shape: [B * nvars, 3, H, W]
-
-        # 2. Generate text prompts
-        prompts = self.generate_time_series_prompt(x_enc, self.description, self.config.pred_len, self.config.seq_len)
-        # Ensure prompts list has length B
-        if not isinstance(prompts, list):
-            prompts = prompts.tolist()
-        if len(prompts)!= B:
-            prompts = prompts[:B] if len(prompts) > B else prompts + [prompts[-1]] * (B - len(prompts))
-        
-        # Query-time series interaction
-        text_vectors = self.query_time_series_interaction(x_enc, patchs)
-
-        # 3. Process images and text prompts and fuse them based on the VLM type
-        if self.vlm_type == "clip":
-            assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
-            
-            try:
-                # Process images using CLIP's processor and model
-                processed_images = self.clip_processor(images=images, return_tensors="pt")["pixel_values"].to(device)
-                image_embeddings = self.clip_model.get_image_features(processed_images)  # Shape: [B * nvars, 512]
-                    
-                # Process text prompts using CLIP's processor and model
-                all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
-                text_encodings = self.clip_processor(text=all_text_prompts, return_tensors="pt", padding=True).to(device)
-                text_embeddings = self.clip_model.get_text_features(**text_encodings)  # Shape: [B * 2, 512]
-                    
-            except Exception as e:
-                print(f"Error processing data: {e}")
-                print(f"Images shape: {images.shape}")
-                print(f"Prompts: {prompts}")
-                raise e
-
-            # Reshape embeddings to [B, n_prompts, embedding_dim]
-            text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, 512]
-            image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, 512]
-
-            # Fuse text and image embeddings
-            fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 + nvars, 512]
-            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1) # Shape: [B, 3 + nvars, 512]
-            
-        elif self.vlm_type == "blip2":
-            seq_len = self.llm_output_len  # LLM output sequence length
-            sub_batch_size = 32  # Adjust according to memory situation
-            embeddings_list = []  # Store embeddings for each batch
-            
-            for i in range(0, B, sub_batch_size):
-                end_idx = min(i + sub_batch_size, B)
-                batch_images = images[i:end_idx]
-                batch_prompts = prompts[i:end_idx]
-                
-                try:
-                    # Process images and text prompts using BLIP2's processor and model
-                    encoding = self.blip2_processor(images=batch_images, text=batch_prompts, return_tensors="pt", padding=True).to(device)
-                    blip2_outputs = self.blip2_model(**encoding, output_hidden_states=True) # blip2_model.keys() — odict_keys(['logits', 'vision_outputs', 'qformer_outputs', 'language_model_outputs']
-                    
-                    # Extract the last hidden states from the language model
-                    llm_outputs = blip2_outputs.language_model_outputs.hidden_states[-1]
-                    
-                    # Truncate or pad the output sequence length, as the model may output more or fewer tokens                    
-                    if llm_outputs.shape[1] > self.llm_output_len:
-                        llm_outputs = llm_outputs[:, :self.llm_output_len, :]
-                    elif llm_outputs.shape[1] < self.llm_output_len:
-                        repeat_times = -(-self.llm_output_len // llm_outputs.shape[1])
-                        llm_outputs = llm_outputs.repeat(1, repeat_times, 1)[:, :self.llm_output_len, :]
-                    
-                    # Append the embeddings to the list
-                    embeddings_list.append(llm_outputs)
-                
-                except Exception as e:
-                    print(f"Error processing batch {i} to {end_idx}: {e}")
-                    print(f"Batch images shape: {batch_images.shape}")
-                    print(f"Batch prompts: {batch_prompts}")
-                    
-                    # Use zero padding if processing fails
-                    embeddings_list.append(torch.zeros(end_idx - i, seq_len, self.blip2_hidden_size, device=device))
-        
-            # Concatenate embeddings from all batches to get the final fused embeddings
-            fused_embeddings = torch.cat(embeddings_list, dim=0)  # [B, seq_len, hidden_dim] => [32, 256, 2560]
-            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1) 
-            
-        elif self.vlm_type == "vilt":
-            
-            sub_batch_size = 32
-            embeddings_list = []  # Store embeddings for each batch
-            
-            for i in range(0, B, sub_batch_size):
-                end_idx = min(i + sub_batch_size, B)
-                batch_images = images[i:end_idx]
-
-                try:
-                    encoding = self.vilt_processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(device)
-                    vilt_outputs = self.vilt_model(**encoding, output_hidden_states=True)
-                    vilt_outputs = vilt_outputs.hidden_states[-1]
-                    embeddings_list.append(vilt_outputs)
-                                    
-                except Exception as e:
-                    print(f"Error processing data: {e}")
-                    print(f"Images shape: {images.shape}")
-                    print(f"Prompts len: {len(prompts)}")
-                    raise e
-            
-            fused_embeddings = torch.cat(embeddings_list, dim=0) 
-            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1) 
-            # Truncate or pad the output sequence length, as the model may output more or fewer tokens                    
-            if fused_embeddings.shape[1] > self.vilt_fusion_len:
-                fused_embeddings = fused_embeddings[:, :self.vilt_fusion_len, :]
-            elif fused_embeddings.shape[1] < self.vilt_fusion_len:
-                repeat_times = -(-self.vilt_fusion_len // fused_embeddings.shape[1])
-                fused_embeddings = fused_embeddings.repeat(1, repeat_times, 1)[:, :self.vilt_fusion_len, :]
-
-        # 4. Apply projection on the fused embeddings
-        fused_projected = self.temporal_projection(fused_embeddings)  # Shape: [B, fusion_dim, pred_len], or using the sequence projection
-    
-        # 5. Predict using MLP
-        predictions = self.predictor(fused_projected)  # Shape: [B, pred_len, c_out]
-        
-        # 6. Add supplementary features
-        supplementary_features = self.temporal_head(patchs)
-        supplementary_features = einops.rearrange(supplementary_features, '(b n) d -> b d n', b=B)
-        predictions += supplementary_features
-        
-        # 7. Denormalize the prediction results
-        y = self._denormalize_output(predictions, means, stdev)
-
-        return y
-
-    def _normalize_input(self, x):
-        """
-        Normalize the input time series data.
-
-        Args:
-            - x: Input data of shape [B, L, D].
-
-        Returns:
-            - Normalized data.
-            - Means of each feature.
-            - Standard deviations of each feature.
-        """
-        means = x.mean(1, keepdim=True).detach()  # Calculate mean values and detach gradients [B, 1, nvars]
-        x = x - means  # Subtract mean values
-        stdev = torch.sqrt(torch.var(x, dim=1, keepdim=True, unbiased=False) + 1e-5)  # Calculate standard deviations and prevent division by zero [B, 1, nvars]
-        stdev /= self.norm_const  # Adjust standard deviations
-        x = x / stdev  
-        return x, means, stdev
-    
-    def _denormalize_output(self, y, means, stdev):
-        """
-        Denormalize the model's output predictions.
-
-        Args:
-            - y: Output predictions of shape [B, pred_len, c_out].
-            - means: Means of the original data.
-            - stdev: Standard deviations of the original data.
-
-        Returns:
-            - y: Denormalized data.
-        """
-        y = y * (stdev.repeat(1, self.pred_len, 1))
-        y = y + (means.repeat(1, self.pred_len, 1))
-        return y
 
 
 def check_image_channel(np_img):

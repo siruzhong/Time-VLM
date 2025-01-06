@@ -101,13 +101,14 @@ if __name__ == '__main__':
     parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, etc.')
     parser.add_argument('--image_size', type=int, default=224, help='image size for time series to image')
     parser.add_argument('--predictor_hidden_dims', type=int, default=16, help='hidden layer dimensions of predictor')
-    parser.add_argument('--llm_output_len', type=int, default=256, help='output length of the LLM in BLIP-2')
     parser.add_argument('--periodicity', type=int, default=96)
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
     parser.add_argument('--three_channel_image', type=str2bool, default=True, help='use three channel image')
     parser.add_argument('--finetune_clip', type=str2bool, default=False, help='finetune CLIP model')
     parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
+    parser.add_argument('--learnable_image', type=str2bool, default=True, help='learnable image')
+    parser.add_argument('--save_images', type=str2bool, default=False, help='save images')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
