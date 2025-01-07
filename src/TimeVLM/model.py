@@ -13,9 +13,9 @@ from pytorch_wavelets import DWTForward
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from layers.Embed import PatchEmbedding
-from layers.Temporal_Projection import TemporalProjection
+from layers.Temporal_Projection import TemporalProjection, MultiscaleTemporalProjection
 from layers.Flatten_Head import FlattenHead
-from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage
+from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage, MultiscaleLearnableTimeSeriesToImage
 from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
 from layers.models_mae import *
 from transformers.models.vilt import *
