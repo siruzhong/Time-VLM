@@ -2,6 +2,7 @@ from data_provider.data_loader import Dataset_ETT_hour, Dataset_ETT_minute, Data
     MSLSegLoader, SMAPSegLoader, SMDSegLoader, SWATSegLoader, UEAloader
 from data_provider.uea import collate_fn
 from torch.utils.data import DataLoader
+import torch
 
 data_dict = {
     'ETTh1': Dataset_ETT_hour,
@@ -76,6 +77,11 @@ def data_provider(args, flag):
             freq=freq,
             seasonal_patterns=args.seasonal_patterns
         )
+        if args.percent < 1. and flag == 'train':
+            num_samples = int(len(data_set) * args.percent)
+            indices = torch.randperm(len(data_set))[:num_samples]
+            data_set = torch.utils.data.Subset(data_set, indices)
+            print(f"Few-shot sampling: {args.percent*100}% of data, {len(data_set)} samples")
         print(flag, len(data_set))
         data_loader = DataLoader(
             data_set,
