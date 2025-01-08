@@ -38,6 +38,15 @@ class Exp_Basic(object):
             'PAttn': PAttn,
             'TimeXer': TimeXer
         }
+        if args.model == 'ScoreGrad':
+            from models.Diffusion_based import ScoreGrad
+            self.model_dict['ScoreGrad'] = ScoreGrad
+        if args.model == 'CSDI':
+            from models.Diffusion_based import CSDI
+            self.model_dict['CSDI'] = CSDI
+        if args.model == 'DiffusionTS':
+            from models.Diffusion_based import DiffusionTS
+            self.model_dict['DiffusionTS'] = DiffusionTS
         if args.model == 'Mamba':
             print('Please make sure you have successfully installed mamba_ssm')
             from models import Mamba
