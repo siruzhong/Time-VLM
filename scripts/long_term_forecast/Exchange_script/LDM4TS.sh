@@ -1,0 +1,26 @@
+export CUDA_VISIBLE_DEVICES=2
+
+model_name=LDM4TS
+seq_len=512
+for pred_len in 96 192 336 720
+do
+
+python -u run_ldm.py \
+  --task_name long_term_forecast \
+  --is_training 1 \
+  --root_path ./dataset/exchange_rate/ \
+  --data_path exchange_rate.csv \
+  --model_id Exchange_$seq_len'_'$pred_len \
+  --model $model_name \
+  --data custom \
+  --features M \
+  --seq_len $seq_len \
+  --label_len 48 \
+  --pred_len $pred_len \
+  --e_layers 2 \
+  --d_layers 1 \
+  --enc_in 8 \
+  --des 'Exp' \
+  --itr 1 \
+
+done

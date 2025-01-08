@@ -1,15 +1,6 @@
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
-model_name=TimeMixer
-
-e_layers=4
-down_sampling_layers=1
-down_sampling_window=2
-learning_rate=0.01
-d_model=32
-d_ff=32
-batch_size=16
-
+model_name=LDM4TS
 
 python -u run.py \
   --task_name short_term_forecast \
@@ -20,23 +11,19 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 32 \
   --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
 
 python -u run.py \
@@ -48,23 +35,19 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 16 \
   --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
 
 python -u run.py \
@@ -76,23 +59,19 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 64 \
   --d_ff 64 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
 
 python -u run.py \
@@ -104,23 +83,19 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 16 \
   --d_ff 16 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
 
 python -u run.py \
@@ -132,23 +107,19 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 32 \
   --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
 
 python -u run.py \
@@ -160,21 +131,17 @@ python -u run.py \
   --model $model_name \
   --data m4 \
   --features M \
-  --e_layers $e_layers \
+  --e_layers 2 \
   --d_layers 1 \
   --factor 3 \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 128 \
-  --d_model $d_model \
+  --batch_size 16 \
+  --d_model 32 \
   --d_ff 32 \
+  --top_k 5 \
   --des 'Exp' \
   --itr 1 \
-  --learning_rate $learning_rate \
-  --train_epochs 50 \
-  --patience 20 \
-  --down_sampling_layers $down_sampling_layers \
-  --down_sampling_method avg \
-  --down_sampling_window $down_sampling_window \
+  --learning_rate 0.001 \
   --loss 'SMAPE'
