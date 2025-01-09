@@ -2,6 +2,8 @@ import argparse
 import os
 import torch
 from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
+from exp.exp_few_shot_forecasting import Exp_Few_Shot_Forecast
+from exp.exp_zero_shot_forecasting import Exp_Zero_Shot_Forecast
 from exp.exp_imputation import Exp_Imputation
 from exp.exp_short_term_forecasting import Exp_Short_Term_Forecast
 from exp.exp_anomaly_detection import Exp_Anomaly_Detection
@@ -186,6 +188,10 @@ if __name__ == '__main__':
         Exp = Exp_Anomaly_Detection
     elif args.task_name == 'classification':
         Exp = Exp_Classification
+    elif args.task_name == 'zero_shot_forecast':
+        Exp = Exp_Zero_Shot_Forecast
+    elif args.task_name == 'few_shot_forecast':
+        Exp = Exp_Few_Shot_Forecast
     else:
         Exp = Exp_Long_Term_Forecast
 

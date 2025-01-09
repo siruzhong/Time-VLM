@@ -1,17 +1,20 @@
-export CUDA_VISIBLE_DEVICES=2
-
+gpu=2
 model_name=TimeLLM
+learning_rate=0.01
+batch_size=24
+d_ff=128
+seq_len=512
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
   --data_path ETTh2.csv \
-  --model_id ETTh2_96_96 \
+  --model_id ETTh2_512_96 \
   --model $model_name \
   --data ETTh2 \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 96 \
   --e_layers 2 \
@@ -21,18 +24,22 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --learning_rate $learning_rate \
+  --batch_size $batch_size \
+  --d_ff $d_ff \
+  --gpu $gpu
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
   --data_path ETTh2.csv \
-  --model_id ETTh2_96_192 \
+  --model_id ETTh2_512_192 \
   --model $model_name \
   --data ETTh2 \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 192 \
   --e_layers 2 \
@@ -42,18 +49,22 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --learning_rate $learning_rate \
+  --batch_size $batch_size \
+  --d_ff $d_ff \
+  --gpu $gpu
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
   --data_path ETTh2.csv \
-  --model_id ETTh2_96_336 \
+  --model_id ETTh2_512_336 \
   --model $model_name \
   --data ETTh2 \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 336 \
   --e_layers 2 \
@@ -63,18 +74,22 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --learning_rate $learning_rate \
+  --batch_size $batch_size \
+  --d_ff $d_ff \
+  --gpu $gpu
 
 python -u run.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
   --data_path ETTh2.csv \
-  --model_id ETTh2_96_720 \
+  --model_id ETTh2_512_720 \
   --model $model_name \
   --data ETTh2 \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 720 \
   --e_layers 2 \
@@ -84,4 +99,8 @@ python -u run.py \
   --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --itr 1
+  --itr 1 \
+  --learning_rate $learning_rate \
+  --batch_size $batch_size \
+  --d_ff $d_ff \
+  --gpu $gpu
