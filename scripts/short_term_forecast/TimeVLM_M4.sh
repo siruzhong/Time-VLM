@@ -1,6 +1,6 @@
 export TOKENIZERS_PARALLELISM=false
 model_name=TimeVLM
-vlm_type=clip
+vlm_type=vilt
 gpu=1
 image_size=56
 predictor_hidden_dims=128
@@ -26,8 +26,6 @@ python -u run.py \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 16 \
-  --d_model 512 \
   --des 'Exp' \
   --itr 1 \
   --loss 'SMAPE' \
@@ -57,15 +55,13 @@ python -u run.py \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 16 \
-  --d_model 512 \
   --des 'Exp' \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
-  --periodicity 3 \
+  --periodicity 1 \
   --three_channel_image $three_channel_image \
   --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
@@ -88,15 +84,13 @@ python -u run.py \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 16 \
-  --d_model 512 \
   --des 'Exp' \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
-  --periodicity 96 \
+  --periodicity 4 \
   --three_channel_image $three_channel_image \
   --finetune_vlm $finetune_vlm \
   --batch_size $batch_size \
@@ -119,8 +113,6 @@ python -u run.py \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 16 \
-  --d_model 512 \
   --des 'Exp' \
   --itr 1 \
   --loss 'SMAPE' \
@@ -150,8 +142,6 @@ python -u run.py \
   --enc_in 1 \
   --dec_in 1 \
   --c_out 1 \
-  --batch_size 16 \
-  --d_model 512 \
   --des 'Exp' \
   --itr 1 \
   --loss 'SMAPE' \

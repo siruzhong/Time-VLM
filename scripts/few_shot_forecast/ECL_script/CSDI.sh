@@ -1,7 +1,7 @@
 export CUDA_VISIBLE_DEVICES=2
 
-model_name=LDM4TS
-seq_len=512
+model_name=CSDI
+seq_len=96
 
 for pred_len in 96 192 336 720
 do

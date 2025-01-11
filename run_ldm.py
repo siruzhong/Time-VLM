@@ -28,8 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_id', type=str, required=True, default='test', help='model id')
     parser.add_argument('--model', type=str, required=True, default='Autoformer',
                         help='model name, options: [Autoformer, Transformer, TimesNet]')
-    parser.add_argument('--percent', type=float, default=1, help='proportion of in-distribution downstream dataset')
-
+    
     # data loader
     parser.add_argument('--data', type=str, required=True, default='ETTm1', help='dataset type')
     parser.add_argument('--root_path', type=str, default='./data/ETT/', help='root path of the data file')
@@ -40,6 +39,14 @@ if __name__ == '__main__':
     parser.add_argument('--freq', type=str, default='h',
                         help='freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
+
+    # zero-shot forecasting
+    parser.add_argument('--target_data', type=str, default='ETTh2', help='target dataset type')
+    parser.add_argument('--target_root_path', type=str, default='./data/ETT/', help='root path of the target data file')
+    parser.add_argument('--target_data_path', type=str, default='ETTh2.csv', help='target data file')
+
+    # few-shot forecasting
+    parser.add_argument('--percent', type=float, default=1, help='proportion of in-distribution downstream dataset')
 
     # forecasting task
     parser.add_argument('--seq_len', type=int, default=96, help='input sequence length')

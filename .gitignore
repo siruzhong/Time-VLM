@@ -4,6 +4,7 @@ dataset
 tutorial/ckpt
 tutorial/*.pth
 tutorial/checkpoints
+tutorial/vis_forecasting
 wandb/
 src/LDM4TS/visualizations
 logs

@@ -1,7 +1,6 @@
 export CUDA_VISIBLE_DEVICES=3
-model_name=LDM4TS
+model_name=CSDI
 seq_len=512
-image_size=32
 
 for pred_len in 96 192 336 720
 do
@@ -13,6 +12,7 @@ python -u run_ldm.py \
   --data_path ETTh2.csv \
   --model_id ETTh2_$seq_len'_'$pred_len \
   --model $model_name \
+  --percent 0.1 \
   --data ETTh2 \
   --features M \
   --seq_len $seq_len \
@@ -26,9 +26,5 @@ python -u run_ldm.py \
   --des 'Exp' \
   --periodicity 24 \
   --itr 1 \
-  --image_size $image_size \
-  --use_amp \
-  --batch_size 16 \
-  --learning_rate 0.001 \
-  --num_workers 32
+
 done

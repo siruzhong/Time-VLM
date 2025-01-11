@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=0
 
-model_name=LDM4TS
+model_name=ScoreGrad
 seq_len=512
 
 for pred_len in 96 192 336 720

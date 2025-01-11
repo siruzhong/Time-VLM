@@ -1,7 +1,6 @@
-export CUDA_VISIBLE_DEVICES=3
-model_name=LDM4TS
-seq_len=512
-image_size=32
+export CUDA_VISIBLE_DEVICES=1
+model_name=CSDI
+seq_len=96
 
 for pred_len in 96 192 336 720
 do
@@ -10,25 +9,24 @@ python -u run_ldm.py \
   --task_name long_term_forecast \
   --is_training 1 \
   --root_path ./dataset/ETT-small/ \
-  --data_path ETTh2.csv \
-  --model_id ETTh2_$seq_len'_'$pred_len \
+  --data_path ETTm2.csv \
+  --model_id ETTm2_$seq_len'_'$pred_len \
   --model $model_name \
-  --data ETTh2 \
+  --data ETTm2 \
+  --percent 0.1 \
   --features M \
   --seq_len $seq_len \
-  --label_len 48 \
   --pred_len $pred_len \
   --e_layers 2 \
+  --d_layers 1 \
+  --factor 3 \
   --enc_in 7 \
-  --expand 2 \
-  --d_conv 4 \
+  --dec_in 7 \
   --c_out 7 \
   --des 'Exp' \
-  --periodicity 24 \
-  --itr 1 \
-  --image_size $image_size \
-  --use_amp \
-  --batch_size 16 \
+  --periodicity 96 \
+  --gate_dim 32 \
   --learning_rate 0.001 \
-  --num_workers 32
+  --itr 1
+
 done

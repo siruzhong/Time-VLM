@@ -1,8 +1,5 @@
 '''
 Framework Description:
-该框架通过将原始时间序列转换为多种图像表示(包括VisionTS、GAF和RP)，经过掩码处理后送入编码器，
-将数据映射到潜在空间；在潜在空间中，结合频域信息和描述性文本作为条件控制，
-通过扩散过程和去噪U-Net进行处理；最后通过解码器重建数据，实现了一个端到端的时间序列理解与生成系统。
 This framework transforms raw time series data into multiple image representations (including VisionTS, GAF, and RP). 
 After masking, the images are fed into an encoder to map the data into a latent space. 
 In the latent space, frequency domain information and descriptive text are used as conditional controls. 
@@ -291,7 +288,6 @@ class LatentDiffusionModel(nn.Module):
             cross_attention_dim=256
         )
         
-        # 简化投影层
         self.freq_embedding_projection = nn.Sequential(
             nn.Linear(config.freq_embedding_dim, self.d_model),
             nn.LayerNorm(self.d_model),
@@ -304,7 +300,6 @@ class LatentDiffusionModel(nn.Module):
             nn.ReLU()
         )
         
-        # 简化融合层
         self.fusion_layer = nn.Sequential(
             nn.Linear(self.d_model * 2, self.d_model),
             nn.LayerNorm(self.d_model),
@@ -340,47 +335,38 @@ class LatentDiffusionModel(nn.Module):
             self.register_buffer('sqrt_one_minus_alphas', 
                 torch.sqrt(1 - self.alphas))
 
-
     def forward(self, image_input, descriptions, freq_embedding):
         B = image_input.size(0)
         device = image_input.device
         
-        # 确保 scheduler 的张量在正确的设备上
         if self.scheduler.alphas_cumprod.device != device:
             self.scheduler.alphas_cumprod = self.scheduler.alphas_cumprod.to(device)
         
         self._initialize_buffers(device)
         
-        # 1. Encode the image into latent space
         with torch.no_grad():
             latent_dist = self.autoencoder.encode(image_input).latent_dist
             latent = latent_dist.sample()
             latent = latent * 0.18215
         
-        # 2. 直接处理文本嵌入,不使用缓存
         tokenized = self.tokenizer(descriptions, return_tensors="pt", padding=True, truncation=True).to(device)
         text_inputs = self.text_encoder(**tokenized).last_hidden_state
         text_embeddings = torch.mean(text_inputs, dim=1)
         text_embeddings = self.text_projection(text_embeddings)
         
-        # 3. Project frequency embeddings
         freq_embeddings = self.freq_embedding_projection(freq_embedding)
         
-        # 4. 对齐文本嵌入和频域嵌入的批量大小
         if text_embeddings.size(0) == 1 and freq_embeddings.size(0) > 1:
             text_embeddings = text_embeddings.repeat(freq_embeddings.size(0), 1)
         
-        # 5. Fuse embeddings
         combined_embeddings = torch.cat([text_embeddings, freq_embeddings], dim=1)
         combined_embeddings = self.fusion_layer(combined_embeddings)
         conditioning = combined_embeddings.unsqueeze(1)
         
-        # 6. 初始化输出张量
         batch_size = latent.shape[0]
         device = latent.device
         latents = latent.clone()
         
-        # 7. 使用向量化操作进行批处理
         timesteps = torch.randint(
             low=0, 
             high=self.scheduler.num_train_timesteps, 
@@ -388,17 +374,13 @@ class LatentDiffusionModel(nn.Module):
             device=device
         ).long()
 
-        # 8. 添加噪声
         noise = torch.randn_like(latents)
         noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
         
-        # 9. 预测噪声
         noise_pred = self.unet(noisy_latents, timesteps, encoder_hidden_states=conditioning).sample
         
-        # 10. 批量去噪处理
         latents = []
         for i in range(batch_size):
-            # 为每个样本单独处理，但保持在GPU上
             step_output = self.scheduler.step(
                 model_output=noise_pred[i:i+1],
                 sample=noisy_latents[i:i+1],
@@ -406,10 +388,8 @@ class LatentDiffusionModel(nn.Module):
             )
             latents.append(step_output.prev_sample)
         
-        # 11. 合并结果
         latents = torch.cat(latents, dim=0)
         
-        # 12. Decode latents
         with torch.no_grad():
             reconstructed_image = self.autoencoder.decode(latents / 0.18215).sample
         
