@@ -11,7 +11,8 @@ finetune_vlm=False
 batch_size=32
 num_workers=32
 learning_rate=0.001
-seq_len=96
+seq_len=512
+d_model=128
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -35,6 +36,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -68,6 +70,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -101,6 +104,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -134,6 +138,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \

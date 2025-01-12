@@ -11,6 +11,8 @@ finetune_vlm=False
 batch_size=32
 num_workers=32
 learning_rate=0.001
+seq_len=512
+d_model=128
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -21,7 +23,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 96 \
   --e_layers 2 \
@@ -34,6 +36,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -54,7 +57,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 192 \
   --e_layers 2 \
@@ -67,6 +70,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -87,7 +91,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 336 \
   --e_layers 2 \
@@ -100,6 +104,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
@@ -121,7 +126,7 @@ python -u run.py \
   --data custom \
   --features M \
   --seq_len 96 \
-  --label_len 48 \
+  --seq_len $seq_len \
   --pred_len 720 \
   --e_layers 2 \
   --d_layers 1 \
@@ -133,6 +138,7 @@ python -u run.py \
   --itr 1 \
   --gpu $gpu \
   --use_amp \
+  --d_model $d_model \
   --image_size $image_size \
   --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \

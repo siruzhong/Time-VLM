@@ -11,7 +11,7 @@ finetune_vlm=False
 batch_size=32
 num_workers=32
 learning_rate=0.001
-seq_len=96
+seq_len=512
 task_name=zero_shot_forecast
 
 data=ETTm2

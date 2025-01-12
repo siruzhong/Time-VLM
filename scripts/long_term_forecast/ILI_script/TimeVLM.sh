@@ -4,13 +4,14 @@ vlm_type=vilt
 gpu=0
 image_size=56
 predictor_hidden_dims=128
-periodicity=24
+periodicity=58
 norm_const=0.4
 three_channel_image=True
 finetune_vlm=False
 batch_size=32
 num_workers=32
 learning_rate=0.001
+seq_len=36
 
 python -u run.py \
   --task_name long_term_forecast \
@@ -21,7 +22,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 36 \
+  --seq_len $seq_len \
   --label_len 18 \
   --pred_len 24 \
   --e_layers 4 \
@@ -54,7 +55,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 36 \
+  --seq_len $seq_len \
   --label_len 18 \
   --pred_len 36 \
   --e_layers 4 \
@@ -87,7 +88,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 36 \
+  --seq_len $seq_len \
   --label_len 18 \
   --pred_len 48 \
   --e_layers 4 \
@@ -120,7 +121,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 36 \
+  --seq_len $seq_len \
   --label_len 18 \
   --pred_len 60 \
   --e_layers 4 \

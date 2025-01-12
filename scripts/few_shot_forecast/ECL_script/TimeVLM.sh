@@ -12,6 +12,7 @@ batch_size=32
 num_workers=32
 learning_rate=0.001
 percent=0.1
+seq_len=512
 
 python -u run.py \
   --task_name few_shot_forecast \
@@ -22,7 +23,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 96 \
   --e_layers 2 \
@@ -56,7 +57,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 192 \
   --e_layers 2 \
@@ -90,7 +91,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 336 \
   --e_layers 2 \
@@ -124,7 +125,7 @@ python -u run.py \
   --model $model_name \
   --data custom \
   --features M \
-  --seq_len 96 \
+  --seq_len $seq_len \
   --label_len 48 \
   --pred_len 720 \
   --e_layers 2 \
