@@ -1,7 +1,72 @@
+from sqlite3 import Time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_wavelets import DWTForward
+import matplotlib.pyplot as plt
+import numpy as np
+
+class TimeSeriesVisualizer:
+    """Visualization tools for time series to image conversion"""
+    
+    @staticmethod
+    def plot_feature_maps(features, title="Feature Maps"):
+        """
+        Plot feature maps from intermediate layers
+        Args:
+            features (torch.Tensor): Feature maps tensor of shape [B, C, H, W]
+            title (str): Plot title
+        """
+        if not isinstance(features, torch.Tensor):
+            return
+            
+        # Convert to numpy and normalize
+        features = features.detach().cpu().numpy()
+        features = (features - features.min()) / (features.max() - features.min() + 1e-8)
+        
+        # Plot first batch item
+        num_channels = min(4, features.shape[1])
+        if num_channels == 1:
+            # Handle single channel case
+            plt.figure(figsize=(5, 5))
+            plt.imshow(features[0, 0], cmap='viridis')
+            plt.axis('on')
+            plt.title('Channel 1')
+        else:
+            # Handle multiple channels case
+            fig, axes = plt.subplots(1, num_channels, figsize=(15, 5))
+            for i, ax in enumerate(axes):
+                ax.imshow(features[0, i], cmap='viridis')
+                ax.axis('off')
+                ax.set_title(f'Channel {i+1}')
+        plt.suptitle(title)
+        plt.tight_layout()
+        
+        # Save figure
+        import os
+        os.makedirs('ts-images/ts-visualizer', exist_ok=True)
+        filename = f"ts-images/ts-visualizer/{title.replace(' ', '_')}.png"
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        print(f"Saved visualization to {filename}")
+        plt.close()
+
+    @staticmethod
+    def plot_attention(attention_map, title="Attention Map"):
+        """
+        Plot attention weights
+        Args:
+            attention_map (torch.Tensor): Attention weights tensor
+            title (str): Plot title
+        """
+        if not isinstance(attention_map, torch.Tensor):
+            return
+            
+        attention_map = attention_map.detach().cpu().numpy()
+        plt.figure(figsize=(8, 8))
+        plt.imshow(attention_map[0, 0], cmap='viridis')
+        plt.colorbar()
+        plt.title(title)
+        plt.show()
 
 class LearnableTimeSeriesToImage(nn.Module):
     """
@@ -152,6 +217,8 @@ class MultiscaleLearnableTimeSeriesToImage(nn.Module):
         """
         B, L, D = x_enc.shape
         
+        # TimeSeriesVisualizer.plot_feature_maps(x_enc.unsqueeze(1), "0) Input Time Series") # Shape: [B, 1, L, D]
+
         # Generate periodicity encoding using sin and cos functions
         time_steps = torch.arange(L, dtype=torch.float32).unsqueeze(0).repeat(B, 1).to(x_enc.device)  # shape [B, L]
         
@@ -163,10 +230,14 @@ class MultiscaleLearnableTimeSeriesToImage(nn.Module):
         
         # Repeat periodicity encoding across the feature dimension
         periodicity_encoding = periodicity_encoding.unsqueeze(-2).repeat(1, 1, D, 1)  # shape [B, L, D, 2]
+
+        # TimeSeriesVisualizer.plot_feature_maps(periodicity_encoding.permute(0, 3, 1, 2), "1) Periodicity Encoding")    # Shape: [B, 2, L, D]
         
         # Concatenate the periodicity encoding for each variable to its corresponding time series data
         x_enc = x_enc.unsqueeze(-1)  # shape [B, L, D, 1]
         x_enc = torch.cat([x_enc, periodicity_encoding], dim=-1)  # shape [B, L, D, 3]
+        
+        # TimeSeriesVisualizer.plot_feature_maps(x_enc.permute(0, 3, 1, 2), "2) Input with Periodicity Encoding")  # Shape: [B, 3, L, D]
 
         # Reshape the input to [B * D, 3, L] for the 1D convolution layer
         x_enc = x_enc.view(B * D, 3, L)
@@ -176,9 +247,15 @@ class MultiscaleLearnableTimeSeriesToImage(nn.Module):
         for conv_block in self.conv1d_blocks:
             conv_features.append(conv_block(x_enc))
         x_enc = torch.cat(conv_features, dim=1)  # Concatenate along channel dim
+        
+        # print('x_enc after multi-scale conv:', x_enc.shape)
+        # TimeSeriesVisualizer.plot_feature_maps(x_enc.unsqueeze(1), "3) Conv1D Features")  # Shape: [B*D, 1, L, hidden_dim]
 
         # Apply frequency domain processing
         freq_features = self.freq_processing(x_enc)
+        
+        # print('freq_features:', freq_features.shape)
+        # TimeSeriesVisualizer.plot_feature_maps(freq_features.unsqueeze(1), "4) Frequency Features")  # Shape: [B*D, 1, L//2, C]
         
         # Downsample x_enc to match the sequence length of freq_features
         x_enc_downsampled = x_enc[:, :, ::2]  # Shape: [B*D, C, L//2]
@@ -272,5 +349,10 @@ class MultiscaleLearnableTimeSeriesToImage(nn.Module):
         # Apply 2D convolution with residual connection
         identity = x
         x = self.conv2d_2(x)
+        x = x + identity  # Residual connection
+        return x
+        x = x + identity  # Residual connection
+        return x
+        return x
         x = x + identity  # Residual connection
         return x
