@@ -119,8 +119,18 @@ def cal_accuracy(y_pred, y_true):
     return np.mean(y_pred == y_true)
 
 def load_content(args):
+    dataset_name = os.path.basename(os.path.normpath(args.root_path))
+    print(dataset_name)
     if 'ETT' in args.data:
         file = 'ETT'
+    elif dataset_name == 'traffic':
+        file = 'Traffic'
+    elif dataset_name == 'electricity':
+        file = 'ECL'
+    elif dataset_name == 'weather':
+        file = 'Weather'
+    elif dataset_name == 'illness':
+        file = 'ILI'
     else:
         file = args.data
     with open('./dataset/prompt_bank/{0}.txt'.format(file), 'r') as f:

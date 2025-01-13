@@ -116,14 +116,19 @@ class LearnableTimeSeriesToImage(nn.Module):
         x_enc = x_enc.unsqueeze(-1)  # shape [B, L, D, 1]
         x_enc = torch.cat([x_enc, periodicity_encoding], dim=-1)  # shape [B, L, D, 3]
 
-        # Reshape the input to [B * D, 3, L] for the 1D convolution layer
-        x_enc = x_enc.view(B * D, 3, L)
+        # Reshape the input to [B, D, 3, L] for the 1D convolution layer
+        x_enc = x_enc.permute(0, 2, 3, 1)  # shape [B, D, 3, L]
 
-        # adjust D to hidden_dim
-        x_enc = self.conv1d(x_enc)
+        # Apply 1D convolution to each variable separately
+        x_enc = x_enc.reshape(B * D, 3, L)  # shape [B * D, 3, L]
+        x_enc = self.conv1d(x_enc)  # shape [B * D, hidden_dim, L]
+        x_enc = x_enc.reshape(B, D, self.hidden_dim, L)  # shape [B, D, hidden_dim, L]
 
-        # add channel dimension for 2D convolution to [B, hidden_dim, 1, L]
-        x_enc = x_enc.unsqueeze(2)
+        # Combine the variables by averaging or summing along the D dimension
+        x_enc = x_enc.mean(dim=1)  # shape [B, hidden_dim, L]
+
+        # Add channel dimension for 2D convolution to [B, hidden_dim, 1, L]
+        x_enc = x_enc.unsqueeze(2)  # shape [B, hidden_dim, 1, L]
 
         # 2D Convolution to convert [B, hidden_dim, 1, L] to [B, output_channels, 1, L]
         x_enc = F.relu(self.conv2d_1(x_enc))
@@ -132,10 +137,7 @@ class LearnableTimeSeriesToImage(nn.Module):
         # Interpolate to the desired image size to get [B, output_channels, H, W]
         x_enc = F.interpolate(x_enc, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False)
         
-        # Reshape the output to [B * n_vars, output_channels, H, W]
-        x_enc = x_enc.view(B * D, self.output_channels, self.image_size, self.image_size)
-        
-        return x_enc
+        return x_enc  # shape [B, output_channels, H, W]
 
 
 class MultiscaleLearnableTimeSeriesToImage(nn.Module):

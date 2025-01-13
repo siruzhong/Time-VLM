@@ -21,6 +21,121 @@ from layers.models_mae import *
 from transformers.models.vilt import *
 
 
+import torch.nn as nn
+
+class CustomVLM(nn.Module):
+    """
+    Custom Vision-Language Model that allows separate initialization of vision and text encoders,
+    and supports both separate and fused embeddings.
+    """
+    def __init__(self, config):
+        super(CustomVLM, self).__init__()
+        self.config = config
+        self.device = self._acquire_device()
+        
+        # Initialize hidden_size and fusion_dim
+        self.hidden_size = 768  # Example hidden size, can be adjusted
+        self.fusion_dim = 192   # Example fusion dimension, can be adjusted
+        
+        # Initialize vision and text encoders
+        self._init_vision_encoder()
+        self._init_text_encoder()
+        
+        # Initialize fusion layer
+        self._init_fusion_layer()
+
+    def _acquire_device(self):
+        if self.config.use_gpu and torch.cuda.is_available():
+            device = torch.device(f'cuda:{self.config.gpu}')
+        else:
+            device = torch.device('cpu')
+            print('Use CPU')
+        return device
+
+    def _init_vision_encoder(self):
+        """
+        Initialize the vision encoder (e.g., ViT or ResNet).
+        """
+        from transformers import ViTModel, ViTFeatureExtractor
+        self.vision_processor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
+        self.vision_encoder = ViTModel.from_pretrained('google/vit-base-patch16-224')
+        self.vision_encoder.to(self.device)
+        self._set_requires_grad(self.vision_encoder, self.config.finetune_vlm)
+
+    def _init_text_encoder(self):
+        """
+        Initialize the text encoder (e.g., BERT or RoBERTa).
+        """
+        from transformers import BertTokenizer, BertModel
+        self.text_processor = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.text_encoder = BertModel.from_pretrained('bert-base-uncased')
+        self.text_encoder.to(self.device)
+        self._set_requires_grad(self.text_encoder, self.config.finetune_vlm)
+
+    def _init_fusion_layer(self):
+        """
+        Initialize a fusion layer to combine vision and text embeddings.
+        """
+        self.fusion_layer = nn.Linear(self.hidden_size * 2, self.fusion_dim).to(self.device)
+        self._set_requires_grad(self.fusion_layer, self.config.finetune_vlm)
+
+    def _set_requires_grad(self, model, value):
+        """
+        Set requires_grad for all parameters in a model.
+        """
+        for param in model.parameters():
+            param.requires_grad = value
+
+    def get_vision_embeddings(self, images):
+        """
+        Extract vision embeddings from images.
+        
+        Args:
+            images (List[PIL.Image]): List of input images.
+        
+        Returns:
+            torch.Tensor: Vision embeddings of shape [B, hidden_size].
+        """
+        inputs = self.vision_processor(images=images, return_tensors="pt").to(self.device)
+        outputs = self.vision_encoder(**inputs)
+        return outputs.last_hidden_state.mean(dim=1)  # Average pooling over patches
+
+    def get_text_embeddings(self, texts):
+        """
+        Extract text embeddings from texts.
+        
+        Args:
+            texts (List[str]): List of input texts.
+        
+        Returns:
+            torch.Tensor: Text embeddings of shape [B, hidden_size].
+        """
+        inputs = self.text_processor(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
+        outputs = self.text_encoder(**inputs)
+        return outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
+
+    def get_fused_embeddings(self, images, texts):
+        """
+        Extract fused embeddings from images and texts.
+        
+        Args:
+            images (List[PIL.Image]): List of input images.
+            texts (List[str]): List of input texts.
+        
+        Returns:
+            torch.Tensor: Fused embeddings of shape [B, fusion_dim].
+        """
+        # Get vision and text embeddings
+        vision_embeddings = self.get_vision_embeddings(images)
+        text_embeddings = self.get_text_embeddings(texts)
+        # Reshape embeddings to [B, n_prompts, hidden_size]
+        vision_embeddings = einops.rearrange(vision_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
+        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, hidden_size]
+        # Concatenate vision and text embeddings
+        fused_embeddings = torch.cat([vision_embeddings, text_embeddings], dim=1)
+        return self.fusion_layer(fused_embeddings)
+    
+
 class VLMManager:
     """
     Manager class to handle different VLM types (CLIP, BLIP2, ViLT).
@@ -46,6 +161,8 @@ class VLMManager:
             self._init_blip2()
         elif self.vlm_type == "vilt":
             self._init_vilt()
+        elif self.vlm_type == "custom":
+            self._init_custom()
         else:
             raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt'].")
         self.model.to(self.device)
@@ -59,7 +176,6 @@ class VLMManager:
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 512
         self.fusion_dim = self.config.c_out + 3
-        self.detail_prompt = False
         self.max_input_text_length = 77
 
     def _init_blip2(self):
@@ -69,7 +185,6 @@ class VLMManager:
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 2560
         self.fusion_dim = 256  # output length of the LLM in BLIP-2
-        self.detail_prompt = True
 
     def _init_vilt(self):
         VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
@@ -78,8 +193,16 @@ class VLMManager:
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 768
         self.fusion_dim = 192
-        self.detail_prompt = False
         self.max_input_text_length = 40
+        
+    def _init_custom(self):
+        """
+        Initialize the custom VLM.
+        """
+        self.model = CustomVLM(self.config)
+        self.hidden_size = self.model.hidden_size
+        self.fusion_dim = self.model.fusion_dim
+        self.max_input_text_length = 512  # Adjust based on text encoder
 
     def _set_requires_grad(self, model, value):
         for param in model.parameters():
@@ -95,6 +218,8 @@ class VLMManager:
                 return self._process_blip2_inputs(B, images, prompts)
             elif self.vlm_type == "vilt":
                 return self._process_vilt_inputs(B, images, prompts)
+            elif self.vlm_type == "custom":
+                return self._process_custom_inputs(B, images, prompts)
         except Exception as e:
             print(f"Error processing inputs: {e}")
             print(f"Images shape: {images.shape}")
@@ -102,7 +227,6 @@ class VLMManager:
             raise e
 
     def _process_clip_inputs(self, B, images, prompts):
-        assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
         processed_images = self.processor(images=images, return_tensors="pt")["pixel_values"].to(self.device)
         image_embeddings = self.model.get_image_features(processed_images)
         all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
@@ -127,16 +251,23 @@ class VLMManager:
         return fused_embeddings
     
     def _process_vilt_inputs(self, B, images, prompts):
-        assert all(len(p) == 2 for p in prompts), "Each image should have two captions"
-        sub_batch_size = 32
-        embeddings_list = []  # Store embeddings for each batch
-        for i in range(0, B, sub_batch_size):
-            end_idx = min(i + sub_batch_size, B)
-            batch_images = images[i:end_idx]
-            encoding = self.processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-            outputs = self.model(**encoding, output_hidden_states=True).hidden_states[-1]
-            embeddings_list.append(outputs)
-        fused_embeddings = torch.cat(embeddings_list, dim=0)            
+        encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
+        fused_embeddings = self.model(**encoding, output_hidden_states=True).hidden_states[-1]   
+        return fused_embeddings
+    
+    def _process_custom_inputs(self, B, images, prompts):
+        """
+        Process inputs using the custom VLM.
+        """
+        # Flatten prompts to [B * n_vars]
+        text_embeddings = self.model.get_text_embeddings(prompts)
+        image_embeddings = self.model.get_vision_embeddings(images)
+        
+        # Reshape embeddings to [B, n_prompts, hidden_size]
+        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
+        image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
+        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 * nvars, hidden_size]
+        
         return fused_embeddings
 
 
@@ -183,11 +314,17 @@ class Model(nn.Module):
         x_enc, means, stdev = self._normalize_input(x_enc)
         patchs, _ = self.patch_embedding(x_enc.transpose(1, 2))
 
+        # Convert time series data to images and generate text prompts
         images = self.time_series_to_image(x_enc, self.config.seq_len, self.config.periodicity)
         prompts = self.generate_time_series_prompt(x_enc, self.config.content, self.config.pred_len, self.config.seq_len)
 
-        text_vectors = self.query_time_series_interaction(x_enc, patchs)
+        # Process inputs using the VLM
         fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)
+
+        # Query time series data with text embeddings
+        text_vectors = self.query_time_series_interaction(x_enc, patchs)
+        
+        # Concatenate text embeddings with fused embeddings
         fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)
 
         # Ensure the fused embeddings have the correct dimension
@@ -197,6 +334,7 @@ class Model(nn.Module):
             repeat_times = -(-self.vlm_manager.fusion_dim // fused_embeddings.shape[1])
             fused_embeddings = fused_embeddings.repeat(1, repeat_times, 1)[:, :self.vlm_manager.fusion_dim, :]
         
+        # Temporal projection and prediction
         fused_projected = self.temporal_projection(fused_embeddings)
         predictions = self.predictor(fused_projected)
 
@@ -223,55 +361,33 @@ class Model(nn.Module):
     def generate_time_series_prompt(self, x_enc, description, pred_len, seq_len, top_k=5):
         """
         Generate text prompts for the language model based on time series data.
+        Each variable in the time series will have its own prompt.
         """
-        def calculate_lags(x_enc, top_k):
-            """
-            Calculate lag indicators of the time series based on Fourier transform correlation analysis.
+        B, T, n_vars = x_enc.shape  # Get batch size, sequence length, and number of variables
 
-            Args:
-            - x_enc: Time series data with shape [B, T, d_model].
-            - top_k: The number of lag indicators to select.
-
-            Returns:
-            - lags: A tensor of lag indicators with shape [B, top_k].
-            """
-            q_fft = torch.fft.rfft(x_enc.permute(0, 2, 1).contiguous(), dim=-1)  # Fast Fourier Transform along the time axis
-            k_fft = torch.fft.rfft(x_enc.permute(0, 2, 1).contiguous(), dim=-1)  # Fast Fourier Transform along the time axis
-            res = q_fft * torch.conj(k_fft)  # Calculate Fourier correlation
-            corr = torch.fft.irfft(res, dim=-1)  # Inverse transform back to the time domain
-            mean_value = torch.mean(corr, dim=1)  # Calculate the mean value of lags
-            _, lags = torch.topk(mean_value, top_k, dim=-1)  # Extract lag values
-
-            return lags
-        
-        # Calculate statistics
-        min_values = torch.min(x_enc, dim=1)[0]
-        max_values = torch.max(x_enc, dim=1)[0]
-        medians = torch.median(x_enc, dim=1).values
-        lags = calculate_lags(x_enc, top_k)
-        trends = x_enc.diff(dim=1).sum(dim=1)  # Calculate the overall trend
-
+        # Initialize a list to store prompts for each batch
         prompts = []
-        for b in range(x_enc.shape[0]):
-            min_values_str = str(min_values[b].tolist()[0])
-            max_values_str = str(max_values[b].tolist()[0])
-            median_values_str = str(medians[b].tolist()[0])
-            lags_values_str = str(lags[b].tolist())
-            trend_direction = "upward" if trends[b].mean() > 0 else "downward"  # Determine the overall trend direction using the mean of the trend
-            
-            if self.vlm_manager.detail_prompt:
-                dataset_part = f"Dataset: {description}."
-                task_part = f"Task description: forecast the next {str(pred_len)} steps given the previous {str(seq_len)} steps information."
-                stats_part = f"Input statistics: min value {min_values_str}, max value {max_values_str}, median value {median_values_str}, the trend of input is {trend_direction}, top {top_k} lags are : {lags_values_str}"
-                image_part = f"The time series is visualized by an image showing 2D, Fourier, and Wavelet features, which helps analyze trends and periodicity for forecasting."
-                prompt = f"<|start_prompt|>{dataset_part}{task_part}{stats_part}{image_part}<|end_prompt|>"
-                prompts.append(prompt)
-            else:
-                image_part = f"{seq_len}-time-step img, predict {pred_len} steps."
-                image_part = image_part[:self.vlm_manager.max_input_text_length] if len(image_part) > self.vlm_manager.max_input_text_length else image_part
-                stats_part = (f"Stats: range={float(min_values_str):.6f}~{float(max_values_str):.6f}, trend={trend_direction}, lags={lags_values_str}.")
-                stats_part = stats_part[:self.vlm_manager.max_input_text_length] if len(stats_part) > self.vlm_manager.max_input_text_length else stats_part
-                prompts.append([image_part, stats_part])
+    
+        # Calculate overall statistics for each batch
+        for b in range(B):
+            # Calculate statistics for the current batch
+            min_value = torch.min(x_enc[b]).item()  # Overall minimum value for the batch
+            max_value = torch.max(x_enc[b]).item()  # Overall maximum value for the batch
+            median_value = torch.median(x_enc[b]).item()  # Overall median value for the batch
+            trend = x_enc[b].diff(dim=0).sum().item()  # Overall trend for the batch
+
+            # Determine the overall trend direction
+            trend_direction = "upward" if trend > 0 else "downward"
+                
+            prompt_parts = [
+                "The time series is converted into an image using 1D and 2D convolutional layers, highlighting trends, periodic patterns, and multi-scale features for forecasting.",
+                f"Dataset: {description}",
+                f"Task: Forecast the next {pred_len} steps using the past {seq_len} steps.",
+                f"Input statistics: min value = {min_value:.3f}, max value = {max_value:.3f}, median value = {median_value:.3f}, the overall trend is {trend_direction}."
+            ]
+            prompt = " ".join(prompt_parts)
+            prompt = prompt[:self.vlm_manager.max_input_text_length] if len(prompt) > self.vlm_manager.max_input_text_length else prompt
+            prompts.append(prompt)  
 
         return prompts
 
