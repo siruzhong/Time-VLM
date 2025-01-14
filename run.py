@@ -110,6 +110,7 @@ if __name__ == '__main__':
     parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
     parser.add_argument('--learnable_image', type=str2bool, default=True, help='learnable image')
     parser.add_argument('--save_images', type=str2bool, default=False, help='save images')
+    parser.add_argument('--use_cross_attention', type=str2bool, default=True, help='use cross attention to fuse image and text embeddings')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')

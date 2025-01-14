@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import numpy as np
 import torch
@@ -17,6 +18,7 @@ from layers.Temporal_Projection import TemporalProjection, MultiscaleTemporalPro
 from layers.Flatten_Head import FlattenHead
 from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage, MultiscaleLearnableTimeSeriesToImage
 from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
+from layers.Cross_Attention import CrossAttention
 from layers.models_mae import *
 from transformers.models.vilt import *
 
@@ -76,9 +78,11 @@ class CustomVLM(nn.Module):
         """
         Initialize a fusion layer to combine vision and text embeddings.
         """
-        self.fusion_layer = nn.Linear(self.hidden_size * 2, self.fusion_dim).to(self.device)
-        self._set_requires_grad(self.fusion_layer, self.config.finetune_vlm)
-
+        self.linear = nn.Linear(self.hidden_size, self.hidden_size * 2).to(self.device)
+        self.cross_attention = CrossAttention(hidden_dim=self.hidden_size, num_heads=4)
+        self._set_requires_grad(self.linear, True) # or change to self.config.finetune_vlm
+        self._set_requires_grad(self.cross_attention, True) # or change to self.config.finetune_vlm
+            
     def _set_requires_grad(self, model, value):
         """
         Set requires_grad for all parameters in a model.
@@ -128,10 +132,42 @@ class CustomVLM(nn.Module):
         # Get vision and text embeddings
         image_embeddings = self.get_vision_embeddings(images)
         text_embeddings = self.get_text_embeddings(texts)
-        # Concatenate vision and text embeddings
-        fused_embeddings = torch.cat([image_embeddings, text_embeddings], dim=1)
-        return self.fusion_layer(fused_embeddings)
+
+        # Expand dimensions for cross-attention
+        image_embeddings = image_embeddings.unsqueeze(1)  # Shape: [B, 1, hidden_size]
+        text_embeddings = text_embeddings.unsqueeze(1)    # Shape: [B, 1, hidden_size]
     
+        # Cross-attention: text as query, image as key and value
+        fused_embeddings = self.cross_attention(
+            query=text_embeddings,  # Text as query
+            key=image_embeddings,   # Image as key
+            value=image_embeddings  # Image as value
+        )  # Shape: [B, 1, hidden_size]
+        
+        # Squeeze the extra dimension
+        fused_embeddings = fused_embeddings.squeeze(1)  # Shape: [B, hidden_size]
+        
+        # Linear fusion
+        fused_embeddings = self.linear(fused_embeddings)  # Shape: [B, fusion_dim]
+        return fused_embeddings
+
+    def get_simple_fused_embeddings(self, images, texts):
+        """
+        Extract fused embeddings from images and texts using a simple concatenation.
+        
+        Args:
+            images (List[PIL.Image]): List of input images.
+            texts (List[str]): List of input texts.
+        
+        Returns:
+            torch.Tensor: Fused embeddings of shape [B, fusion_dim].
+        """
+        # Get vision and text embeddings
+        image_embeddings = self.get_vision_embeddings(images)   # Shape: [B, hidden_size]
+        text_embeddings = self.get_text_embeddings(texts)    # Shape: [B, hidden_size]     
+        # Concatenate vision and text embeddings
+        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)    # Shape: [B, 2 * hidden_size])
+        return fused_embeddings
 
 class VLMManager:
     """
@@ -164,7 +200,7 @@ class VLMManager:
             raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt'].")
         self.model.to(self.device)
         learnable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        print(f"VLM Learnable model parameters: {learnable_params}")
+        print("VLM Learnable model parameters: {:,}".format(learnable_params))
 
     def _init_clip(self):
         CLIP_ARCH = 'openai/clip-vit-base-patch32'
@@ -260,9 +296,10 @@ class VLMManager:
         return fused_embeddings
     
     def _process_custom_inputs(self, B, images, prompts):
-        text_embeddings = self.model.get_text_embeddings(prompts)  # Shape: [B, hidden_size]
-        image_embeddings = self.model.get_vision_embeddings(images)  # Shape: [B, hidden_size]
-        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 * hidden_size]
+        if self.config.use_cross_attention:
+            fused_embeddings = self.model.get_fused_embeddings(images, prompts)  # Shape: [B, 2 * hidden_size]
+        else:
+            fused_embeddings = self.model.get_simple_fused_embeddings(images, prompts)
         return fused_embeddings
 
 
