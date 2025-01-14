@@ -325,12 +325,9 @@ class Model(nn.Module):
         # Temporal projection and prediction
         fused_projected = self.temporal_projection(fused_embeddings)
         predictions = self.predictor(fused_projected)
-
         patch_features = self.temporal_head(patchs)
         patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)
-        
         predictions += patch_features
-        print(predictions.shape)
 
         y = self._denormalize_output(predictions, means, stdev)
         return y
