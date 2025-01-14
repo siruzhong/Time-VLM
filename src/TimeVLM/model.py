@@ -9,7 +9,6 @@ import einops
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 from transformers import Blip2Processor, Blip2Model
-from pytorch_wavelets import DWTForward
 
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
@@ -19,6 +18,7 @@ from layers.Flatten_Head import FlattenHead
 from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage, MultiscaleLearnableTimeSeriesToImage
 from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
 from layers.Cross_Attention import CrossAttention
+from layers.TimeSeries_To_Image import time_series_to_simple_image
 from layers.models_mae import *
 from transformers.models.vilt import *
 
@@ -319,7 +319,6 @@ class Model(nn.Module):
         self.patch_embedding = PatchEmbedding(config.d_model, config.patch_len, config.stride, config.padding, config.dropout)
         self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
         self.temporal_head = FlattenHead(config.enc_in, self.head_nf, config.pred_len, head_dropout=config.dropout)
-        self.dwt = DWTForward(J=1, wave='haar')
         self.learnable_image_module = LearnableTimeSeriesToImage(
             input_dim=3, hidden_dim=48, output_channels=3 if config.three_channel_image else 1,
             image_size=config.image_size, periodicity=config.periodicity
@@ -347,7 +346,7 @@ class Model(nn.Module):
         patchs, _ = self.patch_embedding(x_enc.transpose(1, 2))
 
         # Convert time series data to images and generate text prompts
-        images = self.time_series_to_image(x_enc, self.config.seq_len, self.config.periodicity)
+        images = self.time_series_to_image(x_enc, self.config.image_size ,self.config.seq_len, self.config.periodicity)
         prompts = self.generate_time_series_prompt(x_enc, self.config.content, self.config.pred_len, self.config.seq_len)
 
         # Process inputs using the VLM
@@ -415,43 +414,14 @@ class Model(nn.Module):
 
         return prompts
 
-    def time_series_to_image(self, x_enc, context_len, periodicity):
+    def time_series_to_image(self, x_enc, image_size, context_len, periodicity):
         """
         Convert time series data into 3-channel image tensors.
         """
         if self.config.learnable_image:
             images = self.learnable_image_module(x_enc)
-        else:
-            # Adjust padding to make context_len a multiple of periodicity
-            pad_left = 0
-            if context_len % periodicity != 0:
-                pad_left = periodicity - context_len % periodicity
-
-            # Rearrange to [B, nvars, seq_len]
-            x_enc = einops.rearrange(x_enc, 'b s n -> b n s')
-
-            # Pad the time series
-            x_pad = F.pad(x_enc, (pad_left, 0), mode='replicate')
-            
-            # Reshape to [B * nvars, 1, f, p]
-            x_2d = einops.rearrange(x_pad, 'b n (p f) -> (b n) 1 f p', f=periodicity)
-            
-            # Resize the time series data
-            x_resized_2d = F.interpolate(x_2d, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-
-            # Convert to 3-channel image
-            if self.config.three_channel_image:
-                # Apply Fourier transform or wavelet transform
-                x_fft = self._apply_fourier_transform(x_2d)
-                x_wavelet = self._apply_wavelet_transform(x_2d)
-                # Resize the Fourier or wavelet transformed data as image input using interpolation
-                x_resized_fft = F.interpolate(x_fft, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-                x_resized_wavelet = F.interpolate(x_wavelet, size=(self.config.image_size, self.config.image_size), mode='bilinear', align_corners=False)
-                # Concatenate along the channel dimension to form a 3-channel image
-                images = torch.concat([x_resized_2d, x_resized_fft, x_resized_wavelet], dim=1)  # [B * nvars, 3, H, W]
-            else:
-                # Repeat the single channel to create a 3-channel image
-                images = einops.repeat(x_resized_2d, 'b 1 h w -> b c h w', c=3)
+        else:            
+            images = time_series_to_simple_image(x_enc, image_size, context_len, periodicity)
         
         # Normalize images to [0, 255] as uint8
         images = self._normalize_images(images)
@@ -461,27 +431,6 @@ class Model(nn.Module):
             self.save_images(images)
 
         return images
-    
-    def _apply_fourier_transform(self, x_2d):
-        """
-        Apply Fourier transform to the input 2D time series data.
-        """
-        x_fft = torch.fft.fft(x_2d, dim=-1)
-        x_fft_abs = torch.abs(x_fft)  # Take the magnitude part of the Fourier transform
-        return x_fft_abs
-
-    def _apply_wavelet_transform(self, x_2d):
-        """
-        Apply wavelet transform to the input 2D time series data.
-        """
-        # cA: Low-frequency components, cD: High-frequency components
-        cA, cD = self.dwt(x_2d)  # [224, 1, 12, 2], [224, 1, 3, 12, 2]
-        cD_reshaped = cD[0].squeeze(1)  # [224, 3, 12, 2]
-        # Concatenate low-frequency and high-frequency components
-        wavelet_result = torch.cat([cA, cD_reshaped], dim=1)  # [224, 4, 12, 2]
-        # Average across the channel dimension to reduce to 1 channel
-        wavelet_result = wavelet_result.mean(dim=1, keepdim=True)  # [224, 1, 12, 2]
-        return wavelet_result
     
     @staticmethod
     def _normalize_images(images):

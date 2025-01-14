@@ -69,6 +69,7 @@ def print_hyperparameters(args):
     print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
     print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
     print(f'  {"Three Channel Image:":<20}{args.three_channel_image:<20}')
+    print(f'  {"Learnable Image:":<20}{args.learnable_image:<20}')
     print(f'  {"Finetune VLM:":<20}{args.finetune_vlm:<20}')
     print(f'  {"Batch Size:":<20}{args.batch_size:<20}')
     print(f'  {"Num Workers:":<20}{args.num_workers:<20}')
