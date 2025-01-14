@@ -4,21 +4,41 @@ import torch.nn as nn
 class TemporalProjection(nn.Module):
     def __init__(self, fusion_dim, d_model, pred_len, nhead=8, dropout=0.1):
         super().__init__()
+        # Projection layer to map fusion_dim to d_model
+        self.projection = nn.Linear(fusion_dim, d_model)
+        
         # Temporal Feature Extraction
         self.conv_block = nn.Sequential(
-            nn.Conv1d(fusion_dim, fusion_dim*2, kernel_size=3, padding=1),
+            nn.Conv1d(1, d_model, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Conv1d(fusion_dim*2, pred_len, kernel_size=3, padding=1)
+            nn.Conv1d(d_model, pred_len, kernel_size=3, padding=1)
         )
         # Self-Attention Layer
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.norm = nn.LayerNorm(d_model)
         
-    def forward(self, x):  # x: [B, FD, d_model]
-        conv_out = self.conv_block(x)  # [B, FD, d_model] => [B, FD, d_model]
+    def forward(self, x):  # x: [B, fusion_dim]
+        # Project x to [B, d_model]
+        x = self.projection(x)  # [B, fusion_dim] => [B, d_model]
+
+        # Reshape x to [B, 1, d_model] for Conv1d
+        x = x.unsqueeze(1)  # [B, d_model] => [B, 1, d_model]
+
+        # Temporal Feature Extraction
+        conv_out = self.conv_block(x)  # [B, 1, d_model] => [B, pred_len, d_model]
+
+        # Permute for MultiheadAttention: [B, pred_len, d_model] => [pred_len, B, d_model]
+        conv_out = conv_out.permute(1, 0, 2)
+
+        # Self-Attention Layer
         attn_in = self.norm(conv_out)
-        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [B, d_model, pred_len] 
+        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in)  # [pred_len, B, d_model]
+
+        # Permute back: [pred_len, B, d_model] => [B, pred_len, d_model]
+        attn_out = attn_out.permute(1, 0, 2)
+
+        # LayerNorm
         out = self.norm(attn_out)
         return out
     

@@ -35,7 +35,7 @@ class CustomVLM(nn.Module):
         
         # Initialize hidden_size and fusion_dim
         self.hidden_size = 768  # Example hidden size, can be adjusted
-        self.fusion_dim = 192   # Example fusion dimension, can be adjusted
+        self.fusion_dim = 3 * self.hidden_size
         
         # Initialize vision and text encoders
         self._init_vision_encoder()
@@ -126,13 +126,10 @@ class CustomVLM(nn.Module):
             torch.Tensor: Fused embeddings of shape [B, fusion_dim].
         """
         # Get vision and text embeddings
-        vision_embeddings = self.get_vision_embeddings(images)
+        image_embeddings = self.get_vision_embeddings(images)
         text_embeddings = self.get_text_embeddings(texts)
-        # Reshape embeddings to [B, n_prompts, hidden_size]
-        vision_embeddings = einops.rearrange(vision_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
-        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, hidden_size]
         # Concatenate vision and text embeddings
-        fused_embeddings = torch.cat([vision_embeddings, text_embeddings], dim=1)
+        fused_embeddings = torch.cat([image_embeddings, text_embeddings], dim=1)
         return self.fusion_layer(fused_embeddings)
     
 
@@ -175,7 +172,7 @@ class VLMManager:
         self.model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 512
-        self.fusion_dim = self.config.c_out + 3
+        self.fusion_dim = 3 * self.hidden_size
         self.max_input_text_length = 77
 
     def _init_blip2(self):
@@ -184,7 +181,8 @@ class VLMManager:
         self.model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 2560
-        self.fusion_dim = 256  # output length of the LLM in BLIP-2
+        self.fusion_dim = 3 * self.hidden_size
+        self.max_input_text_length = 1024
 
     def _init_vilt(self):
         VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
@@ -192,7 +190,7 @@ class VLMManager:
         self.model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 768
-        self.fusion_dim = 192
+        self.fusion_dim = 3 * self.hidden_size
         self.max_input_text_length = 40
         
     def _init_custom(self):
@@ -227,47 +225,44 @@ class VLMManager:
             raise e
 
     def _process_clip_inputs(self, B, images, prompts):
-        processed_images = self.processor(images=images, return_tensors="pt")["pixel_values"].to(self.device)
-        image_embeddings = self.model.get_image_features(processed_images)
-        all_text_prompts = [prompt for image_prompts in prompts for prompt in image_prompts]  # Flatten all prompts
-        text_encodings = self.processor(text=all_text_prompts, return_tensors="pt", padding=True).to(self.device)
+        images_encodings = self.processor(images=images, return_tensors="pt")["pixel_values"].to(self.device)
+        image_embeddings = self.model.get_image_features(images_encodings)
+        text_encodings = self.processor(text=prompts, return_tensors="pt", padding=True).to(self.device)
         text_embeddings = self.model.get_text_features(**text_encodings)
-        # Reshape embeddings to [B, n_prompts, embedding_dim]
-        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, 2, 512]
-        image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, 512]
         fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 + nvars, 512]
         return fused_embeddings
 
     def _process_blip2_inputs(self, B, images, prompts):
-        sub_batch_size = 32
-        embeddings_list = []  # Store embeddings for each batch
-        for i in range(0, B, sub_batch_size):
-            end_idx = min(i + sub_batch_size, B)
-            batch_images = images[i:end_idx]
-            encoding = self.processor(images=batch_images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-            outputs = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]
-            embeddings_list.append(outputs)
-        fused_embeddings = torch.cat(embeddings_list, dim=0)            
+        encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
+        fused_embeddings = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]   # [B, seq_len, hidden_size]
+        text_token_count = encoding["input_ids"].shape[1]  # Number of text tokens
+        # Extract text and image features
+        text_features = fused_embeddings[:, :text_token_count, :]  # [B, text_token_count, hidden_size]
+        image_features = fused_embeddings[:, text_token_count:, :]  # [B, seq_len - text_token_count, hidden_size]
+        # Pool text and image features (e.g., mean pooling)
+        text_pooled = text_features.mean(dim=1)  # [B, hidden_size]
+        image_pooled = image_features.mean(dim=1)  # [B, hidden_size]
+        fused_embeddings = torch.cat([text_pooled, image_pooled], dim=1)  # [B, 2 * hidden_size]
         return fused_embeddings
     
     def _process_vilt_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-        fused_embeddings = self.model(**encoding, output_hidden_states=True).hidden_states[-1]   
+        fused_embeddings = self.model(**encoding, output_hidden_states=True).hidden_states[-1]  # [B, seq_len, hidden_size]
+        text_token_count = encoding["input_ids"].shape[1]  # Number of text tokens
+        # Extract text and image features
+        text_features = fused_embeddings[:, :text_token_count, :]  # [B, text_token_count, hidden_size]
+        image_features = fused_embeddings[:, text_token_count:, :]  # [B, seq_len - text_token_count, hidden_size]
+        # Pool text and image features (e.g., mean pooling)
+        text_pooled = text_features.mean(dim=1)  # [B, hidden_size]
+        image_pooled = image_features.mean(dim=1)  # [B, hidden_size]
+        # Concatenate text and image features
+        fused_embeddings = torch.cat([text_pooled, image_pooled], dim=1)  # [B, hidden_size * 2]
         return fused_embeddings
     
     def _process_custom_inputs(self, B, images, prompts):
-        """
-        Process inputs using the custom VLM.
-        """
-        # Flatten prompts to [B * n_vars]
-        text_embeddings = self.model.get_text_embeddings(prompts)
-        image_embeddings = self.model.get_vision_embeddings(images)
-        
-        # Reshape embeddings to [B, n_prompts, hidden_size]
-        text_embeddings = einops.rearrange(text_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
-        image_embeddings = einops.rearrange(image_embeddings, '(b n) d -> b n d', b=B)  # Shape: [B, nvars, hidden_size]
-        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 * nvars, hidden_size]
-        
+        text_embeddings = self.model.get_text_embeddings(prompts)  # Shape: [B, hidden_size]
+        image_embeddings = self.model.get_vision_embeddings(images)  # Shape: [B, hidden_size]
+        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)  # Shape: [B, 2 * hidden_size]
         return fused_embeddings
 
 
@@ -319,28 +314,23 @@ class Model(nn.Module):
         prompts = self.generate_time_series_prompt(x_enc, self.config.content, self.config.pred_len, self.config.seq_len)
 
         # Process inputs using the VLM
-        fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)
+        fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)  # Shape: [B, 2 * hidden_size]
 
         # Query time series data with text embeddings
-        text_vectors = self.query_time_series_interaction(x_enc, patchs)
+        text_vectors = self.query_time_series_interaction(x_enc, patchs)  # Shape: [B, hidden_dim]
         
         # Concatenate text embeddings with fused embeddings
-        fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)
-
-        # Ensure the fused embeddings have the correct dimension
-        if fused_embeddings.shape[1] > self.vlm_manager.fusion_dim:
-            fused_embeddings = fused_embeddings[:, :self.vlm_manager.fusion_dim, :]
-        elif fused_embeddings.shape[1] < self.vlm_manager.fusion_dim:
-            repeat_times = -(-self.vlm_manager.fusion_dim // fused_embeddings.shape[1])
-            fused_embeddings = fused_embeddings.repeat(1, repeat_times, 1)[:, :self.vlm_manager.fusion_dim, :]
-        
+        fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)  # Shape: [B, hidden_dim + 2 * hidden_size]
+                
         # Temporal projection and prediction
         fused_projected = self.temporal_projection(fused_embeddings)
         predictions = self.predictor(fused_projected)
 
-        supplementary_features = self.temporal_head(patchs)
-        supplementary_features = einops.rearrange(supplementary_features, '(b n) d -> b d n', b=B)
-        predictions += supplementary_features
+        patch_features = self.temporal_head(patchs)
+        patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)
+        
+        predictions += patch_features
+        print(predictions.shape)
 
         y = self._denormalize_output(predictions, means, stdev)
         return y

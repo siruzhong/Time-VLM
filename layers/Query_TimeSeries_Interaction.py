@@ -56,4 +56,4 @@ class QueryTimeSeriesInteraction(nn.Module):
         # Generate the final text-like vector, shape: [B, hidden_dim]
         text_vectors = self.text_vector_generator(pooled_output)
                 
-        return text_vectors.unsqueeze(1)
+        return text_vectors
