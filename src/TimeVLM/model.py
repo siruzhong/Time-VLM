@@ -37,8 +37,10 @@ class CustomVLM(nn.Module):
         
         # Initialize hidden_size and fusion_dim
         self.hidden_size = 768  # Example hidden size, can be adjusted
-        if config.w_out_visual or config.w_out_text or config.use_cross_attention:
+        if config.w_out_visual or config.w_out_text or config.w_out_query:
             self.fusion_dim = 2 * self.hidden_size
+        else:
+            self.fusion_dim = 3 * self.hidden_size
         
         # Initialize vision and text encoders
         self._init_vision_encoder()
