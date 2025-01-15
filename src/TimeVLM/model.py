@@ -37,7 +37,8 @@ class CustomVLM(nn.Module):
         
         # Initialize hidden_size and fusion_dim
         self.hidden_size = 768  # Example hidden size, can be adjusted
-        self.fusion_dim = 3 * self.hidden_size
+        if config.w_out_visual or config.w_out_text or config.use_cross_attention:
+            self.fusion_dim = 2 * self.hidden_size
         
         # Initialize vision and text encoders
         self._init_vision_encoder()
@@ -296,10 +297,18 @@ class VLMManager:
         return fused_embeddings
     
     def _process_custom_inputs(self, B, images, prompts):
-        if self.config.use_cross_attention:
-            fused_embeddings = self.model.get_fused_embeddings(images, prompts)  # Shape: [B, 2 * hidden_size]
+        # Ablation without image
+        if self.config.w_out_visual:
+            fused_embeddings = self.model.get_text_embeddings(prompts)  # Shape: [B, hidden_size]
+        # Ablation without text
+        elif self.config.w_out_text:
+            fused_embeddings = self.model.get_vision_embeddings(images) # Shape: [B, hidden_size]
+        # Ablation with image and text  
         else:
-            fused_embeddings = self.model.get_simple_fused_embeddings(images, prompts)
+            if self.config.use_cross_attention:
+                fused_embeddings = self.model.get_fused_embeddings(images, prompts)  # Shape: [B, 2 * hidden_size]
+            else:
+                fused_embeddings = self.model.get_simple_fused_embeddings(images, prompts)
         return fused_embeddings
 
 
@@ -353,10 +362,10 @@ class Model(nn.Module):
         fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)  # Shape: [B, 2 * hidden_size]
 
         # Query time series data with text embeddings
-        text_vectors = self.query_time_series_interaction(x_enc, patchs)  # Shape: [B, hidden_dim]
-        
-        # Concatenate text embeddings with fused embeddings
-        fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)  # Shape: [B, hidden_dim + 2 * hidden_size]
+        if not self.config.w_out_query:
+            text_vectors = self.query_time_series_interaction(x_enc, patchs)  # Shape: [B, hidden_dim]
+            # Concatenate text embeddings with fused embeddings
+            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)  # Shape: [B, hidden_dim + 2 * hidden_size]
                 
         # Temporal projection and prediction
         fused_projected = self.temporal_projection(fused_embeddings)

@@ -106,11 +106,13 @@ if __name__ == '__main__':
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
     parser.add_argument('--three_channel_image', type=str2bool, default=True, help='use three channel image')
-    parser.add_argument('--finetune_clip', type=str2bool, default=False, help='finetune CLIP model')
     parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
     parser.add_argument('--learnable_image', type=str2bool, default=True, help='learnable image')
     parser.add_argument('--save_images', type=str2bool, default=False, help='save images')
     parser.add_argument('--use_cross_attention', type=str2bool, default=True, help='use cross attention to fuse image and text embeddings')
+    parser.add_argument('--w_out_visual', type=str2bool, default=False, help='without visual part')
+    parser.add_argument('--w_out_text', type=str2bool, default=False, help='without text part')
+    parser.add_argument('--w_out_query', type=str2bool, default=False, help='without query part')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')

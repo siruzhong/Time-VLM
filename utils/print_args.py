@@ -77,6 +77,9 @@ def print_hyperparameters(args):
     print(f'  {"Seq Len:":<20}{args.seq_len:<20}')
     print(f'  {"Dimension of Model:":<20}{args.d_model:<20}')
     print(f'  {"Use Cross Attention:":<20}{args.use_cross_attention:<20}')
+    print(f'  {"Without Visual:":<20}{args.w_out_visual:<20}')
+    print(f'  {"Without Text:":<20}{args.w_out_text:<20}')
+    print(f'  {"Without Query:":<20}{args.w_out_query:<20}')
     print()
     if args.task_name == 'zero_shot_forecast':
         print(f"[Zero-Shot] Source data: {args.data}, Target data: {args.target_data}")
