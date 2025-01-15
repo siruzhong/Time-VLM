@@ -13,17 +13,39 @@ from transformers import Blip2Processor, Blip2Model
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
 from layers.Embed import PatchEmbedding
-from layers.Temporal_Projection import TemporalProjection, MultiscaleTemporalProjection
-from layers.Flatten_Head import FlattenHead
-from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage, MultiscaleLearnableTimeSeriesToImage
+from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage
 from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
 from layers.Cross_Attention import CrossAttention
 from layers.TimeSeries_To_Image import time_series_to_simple_image
 from layers.models_mae import *
 from transformers.models.vilt import *
-
-
-import torch.nn as nn
+    
+class TemporalProjection(nn.Module):
+    """
+    Temporal Projection module for time series forecasting.
+    """
+    def __init__(self, fusion_dim, d_model, pred_len, nhead=8, dropout=0.1):
+        super().__init__()
+        self.projection = nn.Linear(fusion_dim, d_model)
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(1, d_model, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(d_model, pred_len, kernel_size=3, padding=1)
+        )
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.norm = nn.LayerNorm(d_model)
+        
+    def forward(self, x):
+        x = self.projection(x)  # [B, fusion_dim] => [B, d_model]
+        x = x.unsqueeze(1)  # [B, d_model] => [B, 1, d_model]
+        conv_out = self.conv_block(x)   # [B, 1, d_model] => [B, pred_len, d_model]
+        conv_out = conv_out.permute(1, 0, 2)    # [B, pred_len, d_model] => [pred_len, B, d_model]
+        attn_in = self.norm(conv_out)
+        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [pred_len, B, d_model]
+        attn_out = attn_out.permute(1, 0, 2)    # [B, pred_len, d_model]
+        out = self.norm(attn_out)
+        return out
 
 class CustomVLM(nn.Module):
     """
@@ -327,20 +349,22 @@ class Model(nn.Module):
         self.vlm_model = self.vlm_manager.model
 
     def _init_modules(self, config):
-        self.patch_embedding = PatchEmbedding(config.d_model, config.patch_len, config.stride, config.padding, config.dropout)
+        self.patch_embedding = PatchEmbedding(
+            config.d_model, 
+            config.patch_len, 
+            config.stride, 
+            config.padding, 
+            config.dropout
+        )
         self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
-        self.temporal_head = FlattenHead(config.enc_in, self.head_nf, config.pred_len, head_dropout=config.dropout)
-        self.learnable_image_module = LearnableTimeSeriesToImage(
-            input_dim=3, hidden_dim=48, output_channels=3 if config.three_channel_image else 1,
-            image_size=config.image_size, periodicity=config.periodicity
-        )
-        self.query_time_series_interaction = QueryTimeSeriesInteraction(
-            num_queries=8, time_series_embedding_dim=config.d_model, query_embedding_dim=64,
-            hidden_dim=self.vlm_manager.hidden_size, num_heads=4
-        )
+        self.flatten = nn.Flatten(start_dim=-2)
+        self.temporal_linear = nn.Linear(self.head_nf, config.pred_len)
+        self.temporal_dropout = nn.Dropout(config.dropout)
         self.temporal_projection = TemporalProjection(
-            fusion_dim=self.vlm_manager.fusion_dim, d_model=self.vlm_manager.hidden_size,
-            pred_len=config.pred_len, dropout=config.dropout
+            fusion_dim=self.vlm_manager.fusion_dim, 
+            d_model=self.vlm_manager.hidden_size,
+            pred_len=config.pred_len, 
+            dropout=config.dropout
         )
         self.predictor = nn.Sequential(
             nn.Linear(self.vlm_manager.hidden_size, config.predictor_hidden_dims),
@@ -348,34 +372,57 @@ class Model(nn.Module):
             nn.Dropout(config.dropout),
             nn.Linear(config.predictor_hidden_dims, config.c_out)
         )
+        self.learnable_image_module = LearnableTimeSeriesToImage(
+            input_dim=3, 
+            hidden_dim=48, 
+            output_channels=3 if config.three_channel_image else 1,
+            image_size=config.image_size, 
+            periodicity=config.periodicity
+        )
+        self.query_time_series_interaction = QueryTimeSeriesInteraction(
+            num_queries=8, 
+            time_series_embedding_dim=config.d_model, 
+            query_embedding_dim=64,
+            hidden_dim=self.vlm_manager.hidden_size, 
+            num_heads=4
+        )
+        
+    def forward_prediction(self, x_enc, fused_embeddings):
+        B = x_enc.shape[0]
+        
+        patches, _ = self.patch_embedding(x_enc.transpose(1, 2))
+        flattened_patches = self.flatten(patches)
+        patch_features = self.temporal_linear(flattened_patches)
+        patch_features = self.temporal_dropout(patch_features)
+        patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)
+        
+        if not self.config.w_out_query:
+            text_vectors = self.query_time_series_interaction(x_enc, patches)  # Shape: [B, hidden_dim]
+            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)  # Shape: [B, hidden_dim + 2 * hidden_size]
+        fused_projected = self.temporal_projection(fused_embeddings)
+        fused_features = self.predictor(fused_projected)
+        
+        predictions = fused_features + patch_features
+        
+        return predictions
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
         B, L, D = x_enc.shape
-        device = x_enc.device
         
+        # Normalize input
         x_enc, means, stdev = self._normalize_input(x_enc)
-        patchs, _ = self.patch_embedding(x_enc.transpose(1, 2))
-
+        
         # Convert time series data to images and generate text prompts
-        images = self.time_series_to_image(x_enc, self.config.image_size ,self.config.seq_len, self.config.periodicity)
+        images = self.time_series_to_image(x_enc, self.config.image_size, self.config.seq_len, self.config.periodicity)
         prompts = self.generate_time_series_prompt(x_enc, self.config.content, self.config.pred_len, self.config.seq_len)
-
-        # Process inputs using the VLM
-        fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)  # Shape: [B, 2 * hidden_size]
-
-        # Query time series data with text embeddings
-        if not self.config.w_out_query:
-            text_vectors = self.query_time_series_interaction(x_enc, patchs)  # Shape: [B, hidden_dim]
-            # Concatenate text embeddings with fused embeddings
-            fused_embeddings = torch.cat([text_vectors, fused_embeddings], dim=1)  # Shape: [B, hidden_dim + 2 * hidden_size]
-                
-        # Temporal projection and prediction
-        fused_projected = self.temporal_projection(fused_embeddings)
-        predictions = self.predictor(fused_projected)
-        patch_features = self.temporal_head(patchs)
-        patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)
-        predictions += patch_features
-
+        
+        # Process inputs with the VLM
+        fused_embeddings = self.vlm_manager.process_inputs(B, images, prompts)
+        
+        # Main prediction branch
+        predictions = self.forward_prediction(x_enc, fused_embeddings)
+        
+        # Denormalize output
         y = self._denormalize_output(predictions, means, stdev)
         return y
 
