@@ -50,10 +50,7 @@ class QueryTimeSeriesInteraction(nn.Module):
         # Apply multi-head attention, shape: [batch_size, num_queries, query_dim]
         interaction_output, _ = self.multihead_attention(queries, encoded_time_series, encoded_time_series)
 
-        # Pool across the query dimension, e.g., mean pooling, shape: [B, query_dim]
-        pooled_output = interaction_output.mean(dim=1)
-
-        # Generate the final text-like vector, shape: [B, hidden_dim]
-        text_vectors = self.text_vector_generator(pooled_output)
-                
+        # Generate the final text-like vector, shape: [batch_size, num_queries, hidden_dim]
+        text_vectors = self.text_vector_generator(interaction_output)
+                        
         return text_vectors

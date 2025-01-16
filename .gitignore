@@ -5,6 +5,9 @@ tutorial/ckpt
 tutorial/*.pth
 tutorial/checkpoints
 tutorial/vis_forecasting
+tutorial/*.png
+tutorial/*.pdf
+image_visualization
 wandb/
 src/LDM4TS/visualizations
 logs

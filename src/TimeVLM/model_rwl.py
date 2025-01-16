@@ -374,19 +374,7 @@ class Model(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 16)
         )
-        self.gate_dim = 64
-        self.gate = nn.Sequential(
-            nn.Linear(config.c_out * 2, self.gate_dim),
-            nn.LayerNorm(self.gate_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.gate_dim, self.gate_dim),
-            nn.LayerNorm(self.gate_dim), 
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.gate_dim, 2),
-            nn.Sigmoid()
-        )
+        self.gate_linear = nn.Linear(2 * config.c_out, config.c_out)
         self.predictor = nn.Sequential(
             nn.Linear(config.d_model, config.predictor_hidden_dims),
             nn.ReLU(),
@@ -428,8 +416,8 @@ class Model(nn.Module):
         fused_features = self.predictor(fused_projected)
         
         combined_features = torch.cat([fused_features, patch_features], dim=-1)  # [B, pred_len, 2 * n_vars]
-        gate_weights = self.gate(combined_features)
-        predictions = gate_weights[:, :, 0:1] * fused_features + gate_weights[:, :, 1:2] * patch_features  # [B, pred_len, n_vars]
+        gate = torch.sigmoid(self.gate_linear(combined_features))  # [B, pred_len, n_vars]
+        predictions = gate * fused_features + (1 - gate) * patch_features  # [B, pred_len, n_vars]
                 
         return predictions
 
