@@ -28,7 +28,12 @@ class TemporalProjection(nn.Module):
         super().__init__()
         self.projection = nn.Linear(fusion_dim, d_model)
         self.conv_block = nn.Sequential(
-            nn.Conv1d(16, d_model, kernel_size=3, padding=1),  # Map 16 channels to d_model
+            nn.Conv1d(64, d_model, kernel_size=3, padding=1),
+            nn.LayerNorm(d_model),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Conv1d(d_model, d_model, kernel_size=3, padding=1),
+            nn.LayerNorm(d_model),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Conv1d(d_model, pred_len, kernel_size=3, padding=1)  # Map d_model to pred_len
@@ -233,8 +238,15 @@ class VLMManager:
         self.model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 512
-        self.fusion_dim = 3 * self.hidden_size
+        self.fusion_dim = self.hidden_size
         self.max_input_text_length = 77
+        self.fused_feature_len = 9
+        self.multimodal_fusion_gate = nn.Sequential(
+            nn.Linear(2 * self.hidden_size, self.hidden_size),
+            nn.ReLU(),
+            nn.Linear(self.hidden_size, 1), 
+            nn.Sigmoid()
+        ).to(self.device)
 
     def _init_blip2(self):
         BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
@@ -242,8 +254,9 @@ class VLMManager:
         self.model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
         self._set_requires_grad(self.model, self.config.finetune_vlm)
         self.hidden_size = 2560
-        self.fusion_dim = 3 * self.hidden_size
+        self.fusion_dim = self.hidden_size
         self.max_input_text_length = 1024
+        self.fused_feature_len = 298
 
     def _init_vilt(self):
         VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
@@ -256,6 +269,7 @@ class VLMManager:
         else:
             self.fusion_dim = self.hidden_size
         self.max_input_text_length = 40
+        self.fused_feature_len = 164
         
     def _init_custom(self):
         """
@@ -290,21 +304,42 @@ class VLMManager:
 
     def _process_clip_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt").to(self.device)
-        output = self.model(**encoding)
-        print(output.keys())
+        outputs = self.model(**encoding, output_hidden_states=True)
+        text_features = outputs.text_embeds  # Shape: [B, hidden_size]
+        image_features = outputs.image_embeds  # Shape: [B, hidden_size]
+        if self.config.w_out_visual:
+            return image_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
+        elif self.config.w_out_text:
+            return text_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
+        else:
+            fused_features = torch.cat([text_features, image_features], dim=1)  # Shape: [B, 2 * hidden_size]
+            gate = self.multimodal_fusion_gate(fused_features)  # Shape: [B, 1]
+            fused_features = gate * text_features + (1 - gate) * image_features  # Shape: [B, hidden_size]
+            return fused_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
 
     def _process_blip2_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-        fused_embeddings = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]   # [B, seq_len, hidden_size]
+        outputs = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]   # [B, seq_len, hidden_size]
+        max_seq_len = 290   # Maximum sequence length
+        seq_len = outputs.size(1)  # Current sequence length
+        if seq_len < max_seq_len:
+            padding_size = max_seq_len - seq_len
+            outputs = torch.cat([outputs, torch.zeros(B, padding_size, outputs.size(-1)).to(self.device)], dim=1)  # Shape: [B, 290, hidden_size]
+        elif seq_len > max_seq_len:
+            outputs = outputs[:, :max_seq_len, :]  # Shape: [B, 290, hidden_size]
         text_token_count = encoding["input_ids"].shape[1]  # Number of text tokens
-        # Extract text and image features
-        text_features = fused_embeddings[:, :text_token_count, :]  # [B, text_token_count, hidden_size]
-        image_features = fused_embeddings[:, text_token_count:, :]  # [B, seq_len - text_token_count, hidden_size]
-        # Pool text and image features (e.g., mean pooling)
-        text_pooled = text_features.mean(dim=1)  # [B, hidden_size]
-        image_pooled = image_features.mean(dim=1)  # [B, hidden_size]
-        fused_embeddings = torch.cat([text_pooled, image_pooled], dim=1)  # [B, 2 * hidden_size]
-        return fused_embeddings
+        text_features = outputs[:, :text_token_count, :]  # [B, text_token_count, hidden_size]
+        image_features = outputs[:, text_token_count:, :]  # [B, seq_len - text_token_count, hidden_size]
+        if self.config.w_out_visual:
+            padding_size = max_seq_len - text_token_count
+            text_features = torch.cat([text_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)], dim=1)  # Shape: [B, max_seq_len, hidden_size]
+            return text_features
+        elif self.config.w_out_text:
+            padding_size = max_seq_len - image_features.size(1)
+            image_features = torch.cat([image_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)],dim=1)  # Shape: [B, max_seq_len, hidden_size]
+            return image_features
+        else:
+            return outputs  # Shape: [B, max_seq_len, hidden_size]
     
     def _process_vilt_inputs(self, B, images, prompts):
         encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
@@ -369,12 +404,19 @@ class Model(nn.Module):
             pred_len=config.pred_len, 
             dropout=config.dropout
         )
+        self.reduction_dim = 128
         self.dim_reduction = nn.Sequential(
-            nn.Linear(164, 64),
-            nn.ReLU(),
-            nn.Linear(64, 16)
+            nn.Linear(self.vlm_manager.fused_feature_len, self.reduction_dim),
+            nn.LayerNorm(self.reduction_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(self.reduction_dim, self.reduction_dim),
+            nn.LayerNorm(self.reduction_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(self.reduction_dim, 64)
         )
-        self.gate_dim = 64
+        self.gate_dim = 128
         self.gate = nn.Sequential(
             nn.Linear(config.c_out * 2, self.gate_dim),
             nn.LayerNorm(self.gate_dim),
