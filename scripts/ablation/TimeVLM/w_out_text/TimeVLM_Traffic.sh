@@ -1,6 +1,6 @@
 export TOKENIZERS_PARALLELISM=false
 model_name=TimeVLM
-vlm_type=custom
+vlm_type=vilt
 gpu=1
 image_size=56
 predictor_hidden_dims=128
