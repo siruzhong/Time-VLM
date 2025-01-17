@@ -5,6 +5,10 @@ import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import math
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
+from umap.umap_ import UMAP
+from sklearn.decomposition import PCA
 
 plt.switch_backend('agg')
 
@@ -136,3 +140,77 @@ def load_content(args):
     with open('./dataset/prompt_bank/{0}.txt'.format(file), 'r') as f:
         content = f.read()
     return content
+
+
+def visualize_embeddings_difference(patch_features, fused_features, save_path='embedding_difference.png'):
+    """
+    Visualize the difference between patch_features and fused_features.
+    """
+    fused_mean, fused_var = fused_features.mean(), fused_features.var()
+    patch_mean, patch_var = patch_features.mean(), patch_features.var()
+    print(f"Fused Features - Mean: {fused_mean}, Variance: {fused_var}")
+    print(f"Patch Features - Mean: {patch_mean}, Variance: {patch_var}")
+    cosine_sim = torch.nn.functional.cosine_similarity(fused_features, patch_features, dim=-1)
+    print(f"Cosine Similarity: {cosine_sim.mean()}")
+                
+
+def visualize_embeddings(patch_features, fused_features, save_path='embedding_distribution.png'):
+    """
+    Visualize the spatial distribution of patch_embedding and fused_embedding.
+    """
+    # Ensure inputs are PyTorch tensors
+    if not isinstance(patch_features, torch.Tensor):
+        patch_features = torch.tensor(patch_features)
+    if not isinstance(fused_features, torch.Tensor):
+        fused_features = torch.tensor(fused_features)
+
+    patch_embedding = patch_features.reshape(-1, patch_features.size(-1))  # [B * pred_len, n_vars]
+    fused_embedding = fused_features.reshape(-1, fused_features.size(-1))  # [B * 16, hidden_size]
+    
+    # Move tensors from GPU to CPU and convert to NumPy arrays
+    patch_embedding = patch_embedding.detach().cpu().numpy()
+    fused_embedding = fused_embedding.detach().cpu().numpy()
+
+    # Randomly sample 1000 points
+    num_samples = 1000
+    patch_embedding = patch_embedding[np.random.choice(patch_embedding.shape[0], num_samples, replace=False)]
+    fused_embedding = fused_embedding[np.random.choice(fused_embedding.shape[0], num_samples, replace=False)]
+
+    # Reduce dimensions using UMAP
+    umap = UMAP(n_components=2, random_state=42)
+    patch_embedding_2d = umap.fit_transform(patch_embedding)
+    fused_embedding_2d = umap.fit_transform(fused_embedding)
+
+    # Create visualization
+    plt.figure(figsize=(10, 6))
+    plt.scatter(patch_embedding_2d[:, 0], patch_embedding_2d[:, 1], c='blue', label='Patch Embedding', alpha=0.6)
+    plt.scatter(fused_embedding_2d[:, 0], fused_embedding_2d[:, 1], c='red', label='Fused Embedding', alpha=0.6)
+    plt.legend()
+    plt.title('Patch Embedding vs Fused Embedding (2D UMAP)')
+    plt.xlabel('Component 1')
+    plt.ylabel('Component 2')
+    plt.savefig(save_path)
+    plt.close()
+
+def visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.png'):
+    """
+    Visualize the distribution of gate weights.
+
+    Args:
+        gate_weights (torch.Tensor): Gate weights with shape [B, pred_len, 2].
+        save_path (str): Path to save visualization, defaults to 'gate_weights_distribution.png'.
+    """
+    # Extract weights for fused_features and patch_features
+    fused_weights = gate_weights[:, :, 0].detach().cpu().numpy().flatten()  # Extract fused_features weights
+    patch_weights = gate_weights[:, :, 1].detach().cpu().numpy().flatten()  # Extract patch_features weights
+
+    # Create visualization
+    plt.figure(figsize=(10, 5))
+    plt.hist(fused_weights, bins=50, alpha=0.5, label='Fused Features Weights')
+    plt.hist(patch_weights, bins=50, alpha=0.5, label='Patch Features Weights')
+    plt.xlabel('Weight Value')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Gate Weights')
+    plt.legend()
+    plt.savefig(save_path)
+    plt.close()
