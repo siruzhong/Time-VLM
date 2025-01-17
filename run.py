@@ -204,6 +204,7 @@ if __name__ == '__main__':
             exp = Exp(args)
             setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_fs{}_{}'.format(
                 args.task_name,
+                args.vlm_type,
                 args.model_id,
                 args.model,
                 args.data,
@@ -226,6 +227,7 @@ if __name__ == '__main__':
         exp = Exp(args)
         setting = '{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_fs{}_{}'.format(
             args.task_name,
+            args.vlm_type,
             args.model_id,
             args.model,
             args.data,

@@ -9,6 +9,7 @@ import einops
 from PIL import Image
 from transformers import CLIPProcessor, CLIPModel
 from transformers import Blip2Processor, Blip2Model
+from utils.tools import visualize_embeddings, visualize_gate_weights, visualize_embeddings_difference
 
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
@@ -429,6 +430,8 @@ class Model(nn.Module):
             nn.Linear(self.gate_dim, 2),
             nn.Sigmoid()
         )
+        self.fused_dim_reduction = nn.Linear(self.vlm_manager.hidden_size, config.d_model)
+        self.attention = nn.MultiheadAttention(config.d_model, num_heads=4)
         self.predictor = nn.Sequential(
             nn.Linear(config.d_model, config.predictor_hidden_dims),
             nn.ReLU(),
@@ -453,24 +456,29 @@ class Model(nn.Module):
     def forward_prediction(self, x_enc, fused_features):
         B = x_enc.shape[0]
         
-        patches, _ = self.patch_embedding(x_enc.transpose(1, 2))
-        flattened_patches = self.flatten(patches)
-        patch_features = self.temporal_linear(flattened_patches)
-        patch_features = self.temporal_dropout(patch_features)
+        patches, _ = self.patch_embedding(x_enc.transpose(1, 2))    # [B, n_patches, d_model]
+        flattened_patches = self.flatten(patches)   # [B, n_patches, d_model] => [B, n_patches * d_model]
+        patch_features = self.temporal_linear(flattened_patches)    # [B, n_patches * d_model] => [B, pred_len]
+        patch_features = self.temporal_dropout(patch_features)  # [B, pred_len]
         patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)  # [B, pred_len, n_vars]
         
         if not self.config.w_out_query:
             text_vectors = self.query_time_series_interaction(x_enc, patches)  # Shape: [B, num_queries, hidden_size]
-            fused_features = torch.cat([text_vectors, fused_features], dim=1)  # Shape: [B, num_queries + seq_len, hidden_size]
+            fused_features = torch.cat([text_vectors, fused_features], dim=1)  # Shape: [B, num_queries + fused_feature_len, hidden_size]
 
-        fused_features = fused_features.permute(0, 2, 1)  # [B, num_queries + seq_len, hidden_size] => [B, hidden_size, num_queries + seq_len]
-        fused_features = self.dim_reduction(fused_features)  # Shape: [B, 16, hidden_size]
-        fused_features = fused_features.permute(0, 2, 1)  # [B, hidden_size, 16] => [B, 16, hidden_size]
+        fused_features = fused_features.permute(0, 2, 1)  # [B, fused_feature_len, hidden_size] => [B, hidden_size, fused_feature_len]
+        fused_features = self.dim_reduction(fused_features)  # Shape: [B, 64, hidden_size]
+        fused_features = fused_features.permute(0, 2, 1)  # [B, hidden_size, 64] => [B, 64, hidden_size]
         fused_projected = self.temporal_projection(fused_features)
         fused_features = self.predictor(fused_projected)
         
         combined_features = torch.cat([fused_features, patch_features], dim=-1)  # [B, pred_len, 2 * n_vars]
         gate_weights = self.gate(combined_features)
+        
+        # visualize_embeddings_difference(patch_features, fused_features, save_path='embedding_difference.png')
+        # visualize_embeddings(patch_features, fused_features, save_path='embedding_distribution.png')
+        # visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.png')
+        
         predictions = gate_weights[:, :, 0:1] * fused_features + gate_weights[:, :, 1:2] * patch_features  # [B, pred_len, n_vars]
                 
         return predictions
