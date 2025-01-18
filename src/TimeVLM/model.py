@@ -20,38 +20,6 @@ from layers.Cross_Attention import CrossAttention
 from layers.TimeSeries_To_Image import time_series_to_simple_image
 from layers.models_mae import *
 from transformers.models.vilt import *
-    
-class TemporalProjection(nn.Module):
-    """
-    Temporal Projection module for time series forecasting.
-    """
-    def __init__(self, fusion_dim, d_model, pred_len, nhead=8, dropout=0.1):
-        super().__init__()
-        self.projection = nn.Linear(fusion_dim, d_model)
-        self.conv_block = nn.Sequential(
-            nn.Conv1d(64, d_model, kernel_size=3, padding=1),
-            nn.LayerNorm(d_model),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(d_model, d_model, kernel_size=3, padding=1),
-            nn.LayerNorm(d_model),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Conv1d(d_model, pred_len, kernel_size=3, padding=1)  # Map d_model to pred_len
-        )
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
-        self.norm = nn.LayerNorm(d_model)
-        
-    def forward(self, x):
-        B, seq_len, fusion_dim = x.shape    # [B, 16, fusion_dim]
-        x = x.reshape(B * seq_len, fusion_dim)  # [B * 16, fusion_dim]
-        x = self.projection(x)  # [B * 16, d_model]
-        x = x.reshape(B, seq_len, -1)  # [B, 16, d_model]
-        conv_out = self.conv_block(x)  # [B, d_model, pred_len]
-        attn_in = self.norm(conv_out)  # [B, pred_len, d_model]
-        attn_out, _ = self.self_attn(attn_in, attn_in, attn_in) # [B, pred_len, d_model]
-        out = self.norm(attn_out)
-        return out
 
 class CustomVLM(nn.Module):
     """
@@ -270,7 +238,7 @@ class VLMManager:
         else:
             self.fusion_dim = self.hidden_size
         self.max_input_text_length = 40
-        self.fused_feature_len = 164
+        self.fused_feature_len = 156
         
     def _init_custom(self):
         """
@@ -397,46 +365,31 @@ class Model(nn.Module):
         )
         self.head_nf = config.d_model * int((config.seq_len - config.patch_len) / config.stride + 2)
         self.flatten = nn.Flatten(start_dim=-2)
-        self.temporal_linear = nn.Linear(self.head_nf, config.pred_len)
+        self.temporal_linear = nn.Linear(self.head_nf, config.d_model)
         self.temporal_dropout = nn.Dropout(config.dropout)
-        self.temporal_projection = TemporalProjection(
-            fusion_dim=self.vlm_manager.fusion_dim, 
-            d_model=config.d_model,
-            pred_len=config.pred_len, 
-            dropout=config.dropout
-        )
-        self.reduction_dim = 128
+        self.variable_embedding = nn.Parameter(torch.randn(config.c_out, config.d_model))
         self.dim_reduction = nn.Sequential(
-            nn.Linear(self.vlm_manager.fused_feature_len, self.reduction_dim),
-            nn.LayerNorm(self.reduction_dim),
+            nn.Linear(self.vlm_manager.fused_feature_len * self.vlm_manager.hidden_size, config.d_model * 2),
             nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.reduction_dim, self.reduction_dim),
-            nn.LayerNorm(self.reduction_dim),
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.reduction_dim, 64)
+            nn.Linear(config.d_model * 2, config.d_model)
         )
-        self.gate_dim = 128
         self.gate = nn.Sequential(
-            nn.Linear(config.c_out * 2, self.gate_dim),
-            nn.LayerNorm(self.gate_dim),
+            nn.Linear(config.d_model * 2, config.d_model),
             nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.gate_dim, self.gate_dim),
-            nn.LayerNorm(self.gate_dim), 
-            nn.GELU(),
-            nn.Dropout(0.1),
-            nn.Linear(self.gate_dim, 2),
-            nn.Sigmoid()
+            nn.Linear(config.d_model, 2),
+            nn.Softmax(dim=-1)
         )
-        self.fused_dim_reduction = nn.Linear(self.vlm_manager.hidden_size, config.d_model)
-        self.attention = nn.MultiheadAttention(config.d_model, num_heads=4)
+        self.shared_projection = nn.Sequential(
+            nn.Linear(config.d_model, config.d_model),
+            nn.GELU(),
+            nn.LayerNorm(config.d_model)
+        )
+        self.attention = nn.MultiheadAttention(config.d_model, num_heads=4, dropout=config.dropout, batch_first=True)
         self.predictor = nn.Sequential(
             nn.Linear(config.d_model, config.predictor_hidden_dims),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Dropout(config.dropout),
-            nn.Linear(config.predictor_hidden_dims, config.c_out)
+            nn.Linear(config.predictor_hidden_dims, config.pred_len)
         )
         self.learnable_image_module = LearnableTimeSeriesToImage(
             input_dim=3, 
@@ -454,33 +407,43 @@ class Model(nn.Module):
         )
         
     def forward_prediction(self, x_enc, fused_features):
-        B = x_enc.shape[0]
+        B, L, n_vars = x_enc.shape
         
-        patches, _ = self.patch_embedding(x_enc.transpose(1, 2))    # [B, n_patches, d_model]
-        flattened_patches = self.flatten(patches)   # [B, n_patches, d_model] => [B, n_patches * d_model]
-        patch_features = self.temporal_linear(flattened_patches)    # [B, n_patches * d_model] => [B, pred_len]
-        patch_features = self.temporal_dropout(patch_features)  # [B, pred_len]
-        patch_features = einops.rearrange(patch_features, '(b n) d -> b d n', b=B)  # [B, pred_len, n_vars]
+        patches, _ = self.patch_embedding(x_enc.transpose(1, 2))    # [B * n_vars, n_patches, d_model]
+        flattened_patches = self.flatten(patches)   # [B * n_vars, n_patches * d_model]
+        patch_features = self.temporal_linear(flattened_patches)    # [B * n_vars, n_patches * d_model] => [B * n_vars, d_model]
+        patch_features = self.temporal_dropout(patch_features)  # [B * n_vars, d_model]
+                
+        flattened_fused_features = fused_features.view(B, -1)  # [B, fused_feature_len * hidden_size]
+        fused_features = self.dim_reduction(flattened_fused_features)  # [B, d_model]
+        fused_features = fused_features.unsqueeze(1) + self.variable_embedding.unsqueeze(0)  # [B, n_vars, d_model]
+        fused_features = einops.rearrange(fused_features, 'b n d -> (b n) d')  # [B * n_vars, d_model]
         
-        if not self.config.w_out_query:
-            text_vectors = self.query_time_series_interaction(x_enc, patches)  # Shape: [B, num_queries, hidden_size]
-            fused_features = torch.cat([text_vectors, fused_features], dim=1)  # Shape: [B, num_queries + fused_feature_len, hidden_size]
+        # Align patch and fused features through linear projection
+        patch_features = self.shared_projection(patch_features)  # [B * n_vars, d_model]
+        fused_features = self.shared_projection(fused_features)  # [B * n_vars, d_model]
 
-        fused_features = fused_features.permute(0, 2, 1)  # [B, fused_feature_len, hidden_size] => [B, hidden_size, fused_feature_len]
-        fused_features = self.dim_reduction(fused_features)  # Shape: [B, 64, hidden_size]
-        fused_features = fused_features.permute(0, 2, 1)  # [B, hidden_size, 64] => [B, 64, hidden_size]
-        fused_projected = self.temporal_projection(fused_features)
-        fused_features = self.predictor(fused_projected)
+        # Use attention to combine patch and fused features
+        fused_features, _ = self.attention(
+            query=patch_features,  # Use patch_features as query
+            key=fused_features,    # Use fused_features as key
+            value=fused_features   # Use fused_features as value
+        )
         
-        combined_features = torch.cat([fused_features, patch_features], dim=-1)  # [B, pred_len, 2 * n_vars]
-        gate_weights = self.gate(combined_features)
+        # Combine patch and fused features
+        combined_features = torch.cat([fused_features, patch_features], dim=-1)  # [B * n_vars, 2 * d_model]
+        gate_weights = self.gate(combined_features)  # [B * n_vars, 2]
+        combined_features = gate_weights[:, 0:1] * fused_features + gate_weights[:, 1:2] * patch_features  # [B * n_vars, d_model]
         
-        # visualize_embeddings_difference(patch_features, fused_features, save_path='embedding_difference.png')
+        # visualize_embeddings_difference(fused_features, patch_features, save_path='embedding_difference.png')
         # visualize_embeddings(patch_features, fused_features, save_path='embedding_distribution.png')
         # visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.png')
         
-        predictions = gate_weights[:, :, 0:1] * fused_features + gate_weights[:, :, 1:2] * patch_features  # [B, pred_len, n_vars]
-                
+        # Make predictions
+        predictions = einops.rearrange(combined_features, '(b n) d -> b n d', b=B, n=n_vars)  # [B, n_vars, d_model]
+        predictions = self.predictor(predictions)  # [B, n_vars, pred_len]
+        predictions = predictions.permute(0, 2, 1)  # [B, pred_len, n_vars]
+        
         return predictions
 
     def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):

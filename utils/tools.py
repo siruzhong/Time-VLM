@@ -164,15 +164,12 @@ def visualize_embeddings(patch_features, fused_features, save_path='embedding_di
     if not isinstance(fused_features, torch.Tensor):
         fused_features = torch.tensor(fused_features)
 
-    patch_embedding = patch_features.reshape(-1, patch_features.size(-1))  # [B * pred_len, n_vars]
-    fused_embedding = fused_features.reshape(-1, fused_features.size(-1))  # [B * 16, hidden_size]
-    
     # Move tensors from GPU to CPU and convert to NumPy arrays
-    patch_embedding = patch_embedding.detach().cpu().numpy()
-    fused_embedding = fused_embedding.detach().cpu().numpy()
+    patch_embedding = patch_features.detach().cpu().numpy()  # [B * n_vars, d_model]
+    fused_embedding = fused_features.detach().cpu().numpy()  # [B * n_vars, d_model]
 
-    # Randomly sample 1000 points
-    num_samples = 1000
+    # Randomly sample 100 points
+    num_samples = min(1000, patch_embedding.shape[0])
     patch_embedding = patch_embedding[np.random.choice(patch_embedding.shape[0], num_samples, replace=False)]
     fused_embedding = fused_embedding[np.random.choice(fused_embedding.shape[0], num_samples, replace=False)]
 
@@ -197,12 +194,12 @@ def visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.pn
     Visualize the distribution of gate weights.
 
     Args:
-        gate_weights (torch.Tensor): Gate weights with shape [B, pred_len, 2].
+        gate_weights (torch.Tensor): Gate weights with shape [B * n_vars, 2].
         save_path (str): Path to save visualization, defaults to 'gate_weights_distribution.png'.
     """
     # Extract weights for fused_features and patch_features
-    fused_weights = gate_weights[:, :, 0].detach().cpu().numpy().flatten()  # Extract fused_features weights
-    patch_weights = gate_weights[:, :, 1].detach().cpu().numpy().flatten()  # Extract patch_features weights
+    fused_weights = gate_weights[:, 0].detach().cpu().numpy().flatten()  # Extract fused_features weights
+    patch_weights = gate_weights[:, 1].detach().cpu().numpy().flatten()  # Extract patch_features weights
 
     # Create visualization
     plt.figure(figsize=(10, 5))
