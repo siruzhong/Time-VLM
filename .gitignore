@@ -15,3 +15,5 @@ ts-images
 results
 test_results
 m4_results
+*.png
+*.sh
