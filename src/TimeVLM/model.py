@@ -1,347 +1,21 @@
 import os
-import re
 import sys
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import einops
 from PIL import Image
-from transformers import CLIPProcessor, CLIPModel
-from transformers import Blip2Processor, Blip2Model
 from utils.tools import visualize_embeddings, visualize_gate_weights, visualize_embeddings_difference
 
 # Import custom modules, assuming they are stored in the parent directory
 sys.path.append("../")
+from src.TimeVLM.vlm_manager import VLMManager
 from layers.Embed import PatchEmbedding
 from layers.Learnable_TimeSeries_To_Image import LearnableTimeSeriesToImage
 from layers.Query_TimeSeries_Interaction import QueryTimeSeriesInteraction
-from layers.Cross_Attention import CrossAttention
 from layers.TimeSeries_To_Image import time_series_to_simple_image
 from layers.models_mae import *
 from transformers.models.vilt import *
-
-class CustomVLM(nn.Module):
-    """
-    Custom Vision-Language Model that allows separate initialization of vision and text encoders,
-    and supports both separate and fused embeddings.
-    """
-    def __init__(self, config):
-        super(CustomVLM, self).__init__()
-        self.config = config
-        self.device = self._acquire_device()
-        
-        # Initialize hidden_size and fusion_dim
-        self.hidden_size = 768  # Example hidden size, can be adjusted
-        if config.w_out_visual or config.w_out_text or config.w_out_query:
-            self.fusion_dim = 2 * self.hidden_size
-        else:
-            self.fusion_dim = 3 * self.hidden_size
-        
-        # Initialize vision and text encoders
-        self._init_vision_encoder()
-        self._init_text_encoder()
-        
-        # Initialize fusion layer
-        self._init_fusion_layer()
-
-    def _acquire_device(self):
-        if self.config.use_gpu and torch.cuda.is_available():
-            device = torch.device(f'cuda:{self.config.gpu}')
-        else:
-            device = torch.device('cpu')
-            print('Use CPU')
-        return device
-
-    def _init_vision_encoder(self):
-        """
-        Initialize the vision encoder (e.g., ViT or ResNet).
-        """
-        from transformers import ViTModel, ViTFeatureExtractor
-        self.vision_processor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
-        self.vision_encoder = ViTModel.from_pretrained('google/vit-base-patch16-224')
-        self.vision_encoder.to(self.device)
-        self._set_requires_grad(self.vision_encoder, self.config.finetune_vlm)
-
-    def _init_text_encoder(self):
-        """
-        Initialize the text encoder (e.g., BERT or RoBERTa).
-        """
-        from transformers import BertTokenizer, BertModel
-        self.text_processor = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.text_encoder = BertModel.from_pretrained('bert-base-uncased')
-        self.text_encoder.to(self.device)
-        self._set_requires_grad(self.text_encoder, self.config.finetune_vlm)
-
-    def _init_fusion_layer(self):
-        """
-        Initialize a fusion layer to combine vision and text embeddings.
-        """
-        self.linear = nn.Linear(self.hidden_size, self.hidden_size * 2).to(self.device)
-        self.cross_attention = CrossAttention(hidden_dim=self.hidden_size, num_heads=4)
-        self._set_requires_grad(self.linear, True) # or change to self.config.finetune_vlm
-        self._set_requires_grad(self.cross_attention, True) # or change to self.config.finetune_vlm
-            
-    def _set_requires_grad(self, model, value):
-        """
-        Set requires_grad for all parameters in a model.
-        """
-        for param in model.parameters():
-            param.requires_grad = value
-
-    def get_vision_embeddings(self, images):
-        """
-        Extract vision embeddings from images.
-        
-        Args:
-            images (List[PIL.Image]): List of input images.
-        
-        Returns:
-            torch.Tensor: Vision embeddings of shape [B, hidden_size].
-        """
-        inputs = self.vision_processor(images=images, return_tensors="pt").to(self.device)
-        outputs = self.vision_encoder(**inputs)
-        return outputs.last_hidden_state.mean(dim=1)  # Average pooling over patches
-
-    def get_text_embeddings(self, texts):
-        """
-        Extract text embeddings from texts.
-        
-        Args:
-            texts (List[str]): List of input texts.
-        
-        Returns:
-            torch.Tensor: Text embeddings of shape [B, hidden_size].
-        """
-        inputs = self.text_processor(texts, return_tensors="pt", padding=True, truncation=True).to(self.device)
-        outputs = self.text_encoder(**inputs)
-        return outputs.last_hidden_state[:, 0, :]  # Use [CLS] token embedding
-
-    def get_fused_embeddings(self, images, texts):
-        """
-        Extract fused embeddings from images and texts.
-        
-        Args:
-            images (List[PIL.Image]): List of input images.
-            texts (List[str]): List of input texts.
-        
-        Returns:
-            torch.Tensor: Fused embeddings of shape [B, fusion_dim].
-        """
-        # Get vision and text embeddings
-        image_embeddings = self.get_vision_embeddings(images)
-        text_embeddings = self.get_text_embeddings(texts)
-
-        # Expand dimensions for cross-attention
-        image_embeddings = image_embeddings.unsqueeze(1)  # Shape: [B, 1, hidden_size]
-        text_embeddings = text_embeddings.unsqueeze(1)    # Shape: [B, 1, hidden_size]
-    
-        # Cross-attention: text as query, image as key and value
-        fused_embeddings = self.cross_attention(
-            query=text_embeddings,  # Text as query
-            key=image_embeddings,   # Image as key
-            value=image_embeddings  # Image as value
-        )  # Shape: [B, 1, hidden_size]
-        
-        # Squeeze the extra dimension
-        fused_embeddings = fused_embeddings.squeeze(1)  # Shape: [B, hidden_size]
-        
-        # Linear fusion
-        fused_embeddings = self.linear(fused_embeddings)  # Shape: [B, fusion_dim]
-        return fused_embeddings
-
-    def get_simple_fused_embeddings(self, images, texts):
-        """
-        Extract fused embeddings from images and texts using a simple concatenation.
-        
-        Args:
-            images (List[PIL.Image]): List of input images.
-            texts (List[str]): List of input texts.
-        
-        Returns:
-            torch.Tensor: Fused embeddings of shape [B, fusion_dim].
-        """
-        # Get vision and text embeddings
-        image_embeddings = self.get_vision_embeddings(images)   # Shape: [B, hidden_size]
-        text_embeddings = self.get_text_embeddings(texts)    # Shape: [B, hidden_size]     
-        # Concatenate vision and text embeddings
-        fused_embeddings = torch.cat([text_embeddings, image_embeddings], dim=1)    # Shape: [B, 2 * hidden_size])
-        return fused_embeddings
-
-class VLMManager:
-    """
-    Manager class to handle different VLM types (CLIP, BLIP2, ViLT).
-    """
-    def __init__(self, config):
-        self.config = config
-        self.vlm_type = config.vlm_type.lower()
-        self.device = self._acquire_device()
-        self._init_vlm()
-        
-    def _acquire_device(self):
-        if self.config.use_gpu and torch.cuda.is_available():
-            device = torch.device(f'cuda:{self.config.gpu}')
-        else:
-            device = torch.device('cpu')
-            print('Use CPU')
-        return device
-
-    def _init_vlm(self):
-        if self.vlm_type == "clip":
-            self._init_clip()
-        elif self.vlm_type == "blip2":
-            self._init_blip2()
-        elif self.vlm_type == "vilt":
-            self._init_vilt()
-        elif self.vlm_type == "custom":
-            self._init_custom()
-        else:
-            raise ValueError(f"Unsupported vlm_type: {self.vlm_type}. Choose from ['clip', 'blip2', 'vilt'].")
-        self.model.to(self.device)
-        learnable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        print("VLM Learnable model parameters: {:,}".format(learnable_params))
-
-    def _init_clip(self):
-        CLIP_ARCH = 'openai/clip-vit-base-patch32'
-        self.processor = CLIPProcessor.from_pretrained(CLIP_ARCH)
-        self.model = CLIPModel.from_pretrained(CLIP_ARCH, output_hidden_states=True)
-        self._set_requires_grad(self.model, self.config.finetune_vlm)
-        self.hidden_size = 512
-        self.fusion_dim = self.hidden_size
-        self.max_input_text_length = 77
-        self.fused_feature_len = 9
-        self.multimodal_fusion_gate = nn.Sequential(
-            nn.Linear(2 * self.hidden_size, self.hidden_size),
-            nn.ReLU(),
-            nn.Linear(self.hidden_size, 1), 
-            nn.Sigmoid()
-        ).to(self.device)
-
-    def _init_blip2(self):
-        BLIP_ARCH = 'Salesforce/blip2-opt-2.7b'
-        self.processor = Blip2Processor.from_pretrained(BLIP_ARCH)
-        self.model = Blip2Model.from_pretrained(BLIP_ARCH, output_hidden_states=True)
-        self._set_requires_grad(self.model, self.config.finetune_vlm)
-        self.hidden_size = 2560
-        self.fusion_dim = self.hidden_size
-        self.max_input_text_length = 1024
-        self.fused_feature_len = 298
-
-    def _init_vilt(self):
-        VILT_ARCH = "dandelin/vilt-b32-finetuned-coco"
-        self.processor = ViltProcessor.from_pretrained(VILT_ARCH)
-        self.model = ViltModel.from_pretrained(VILT_ARCH, output_hidden_states=True)
-        self._set_requires_grad(self.model, self.config.finetune_vlm)
-        self.hidden_size = 768
-        if self.config.w_out_query:
-            self.fusion_dim = self.hidden_size
-        else:
-            self.fusion_dim = self.hidden_size
-        self.max_input_text_length = 40
-        self.fused_feature_len = 156
-        
-    def _init_custom(self):
-        """
-        Initialize the custom VLM.
-        """
-        self.model = CustomVLM(self.config)
-        self.hidden_size = self.model.hidden_size
-        self.fusion_dim = self.model.fusion_dim
-        self.max_input_text_length = 512  # Adjust based on text encoder
-
-    def _set_requires_grad(self, model, value):
-        for param in model.parameters():
-            param.requires_grad = value
-        for child in model.children():
-            self._set_requires_grad(child, value)
-
-    def process_inputs(self, B, images, prompts):
-        try: 
-            if self.vlm_type == "clip":
-                return self._process_clip_inputs(B, images, prompts)
-            elif self.vlm_type == "blip2":
-                return self._process_blip2_inputs(B, images, prompts)
-            elif self.vlm_type == "vilt":
-                return self._process_vilt_inputs(B, images, prompts)
-            elif self.vlm_type == "custom":
-                return self._process_custom_inputs(B, images, prompts)
-        except Exception as e:
-            print(f"Error processing inputs: {e}")
-            print(f"Images shape: {images.shape}")
-            print(f"Prompts: {prompts}")
-            raise e
-
-    def _process_clip_inputs(self, B, images, prompts):
-        encoding = self.processor(images=images, text=prompts, return_tensors="pt").to(self.device)
-        outputs = self.model(**encoding, output_hidden_states=True)
-        text_features = outputs.text_embeds  # Shape: [B, hidden_size]
-        image_features = outputs.image_embeds  # Shape: [B, hidden_size]
-        if self.config.w_out_visual:
-            return image_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
-        elif self.config.w_out_text:
-            return text_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
-        else:
-            fused_features = torch.cat([text_features, image_features], dim=1)  # Shape: [B, 2 * hidden_size]
-            gate = self.multimodal_fusion_gate(fused_features)  # Shape: [B, 1]
-            fused_features = gate * text_features + (1 - gate) * image_features  # Shape: [B, hidden_size]
-            return fused_features.unsqueeze(1)  # Shape: [B, 1, hidden_size]
-
-    def _process_blip2_inputs(self, B, images, prompts):
-        encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-        outputs = self.model(**encoding, output_hidden_states=True).language_model_outputs.hidden_states[-1]   # [B, seq_len, hidden_size]
-        max_seq_len = 290   # Maximum sequence length
-        seq_len = outputs.size(1)  # Current sequence length
-        if seq_len < max_seq_len:
-            padding_size = max_seq_len - seq_len
-            outputs = torch.cat([outputs, torch.zeros(B, padding_size, outputs.size(-1)).to(self.device)], dim=1)  # Shape: [B, 290, hidden_size]
-        elif seq_len > max_seq_len:
-            outputs = outputs[:, :max_seq_len, :]  # Shape: [B, 290, hidden_size]
-        text_token_count = encoding["input_ids"].shape[1]  # Number of text tokens
-        text_features = outputs[:, :text_token_count, :]  # [B, text_token_count, hidden_size]
-        image_features = outputs[:, text_token_count:, :]  # [B, seq_len - text_token_count, hidden_size]
-        if self.config.w_out_visual:
-            padding_size = max_seq_len - text_token_count
-            text_features = torch.cat([text_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)], dim=1)  # Shape: [B, max_seq_len, hidden_size]
-            return text_features
-        elif self.config.w_out_text:
-            padding_size = max_seq_len - image_features.size(1)
-            image_features = torch.cat([image_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)],dim=1)  # Shape: [B, max_seq_len, hidden_size]
-            return image_features
-        else:
-            return outputs  # Shape: [B, max_seq_len, hidden_size]
-    
-    def _process_vilt_inputs(self, B, images, prompts):
-        encoding = self.processor(images=images, text=prompts, return_tensors="pt", padding=True).to(self.device)
-        outputs = self.model(**encoding, output_hidden_states=True)
-        last_hidden_state = outputs.last_hidden_state  # Shape: [B, seq_len, hidden_size]
-        text_token_count = encoding["input_ids"].shape[1]  # Number of text tokens
-        max_seq_len = last_hidden_state.size(1)  # Maximum sequence length (156)
-        if self.config.w_out_visual:
-            text_features = last_hidden_state[:, :text_token_count, :]  # Shape: [B, text_token_count(11), hidden_size]
-            padding_size = max_seq_len - text_token_count
-            text_features = torch.cat([text_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)], dim=1)  # Shape: [B, max_seq_len, hidden_size]
-            return text_features
-        elif self.config.w_out_text:
-            image_features = last_hidden_state[:, text_token_count:, :]  # Shape: [B, image_token_count(145), hidden_size]
-            padding_size = max_seq_len - image_features.size(1)
-            image_features = torch.cat([image_features, torch.zeros(B, padding_size, self.hidden_size).to(self.device)],dim=1)  # Shape: [B, max_seq_len, hidden_size]
-            return image_features
-        else:
-            fused_features = outputs.last_hidden_state  # Shape: [B, max_seq_len(156), hidden_size]
-            return fused_features
-    
-    def _process_custom_inputs(self, B, images, prompts):
-        if self.config.w_out_visual:
-            fused_embeddings = self.model.get_text_embeddings(prompts)  # Shape: [B, hidden_size]
-        elif self.config.w_out_text:
-            fused_embeddings = self.model.get_vision_embeddings(images) # Shape: [B, hidden_size]
-        else:
-            if self.config.use_cross_attention:
-                fused_embeddings = self.model.get_fused_embeddings(images, prompts)  # Shape: [B, 2 * hidden_size]
-            else:
-                fused_embeddings = self.model.get_simple_fused_embeddings(images, prompts)
-        return fused_embeddings
-
 
 class Model(nn.Module):
     """
@@ -386,10 +60,10 @@ class Model(nn.Module):
         )
         self.attention = nn.MultiheadAttention(config.d_model, num_heads=4, dropout=config.dropout, batch_first=True)
         self.predictor = nn.Sequential(
-            nn.Linear(config.d_model, config.predictor_hidden_dims),
+            nn.Linear(config.d_model, config.d_model),
             nn.GELU(),
             nn.Dropout(config.dropout),
-            nn.Linear(config.predictor_hidden_dims, config.pred_len)
+            nn.Linear(config.d_model, config.pred_len)
         )
         self.learnable_image_module = LearnableTimeSeriesToImage(
             input_dim=3, 
@@ -435,9 +109,11 @@ class Model(nn.Module):
         gate_weights = self.gate(combined_features)  # [B * n_vars, 2]
         combined_features = gate_weights[:, 0:1] * fused_features + gate_weights[:, 1:2] * patch_features  # [B * n_vars, d_model]
         
-        # visualize_embeddings_difference(fused_features, patch_features, save_path='embedding_difference.png')
-        # visualize_embeddings(patch_features, fused_features, save_path='embedding_distribution.png')
-        # visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.png')
+        # Optionally visualize embeddings and gate weights
+        if self.config.visualize_embeddings:
+            visualize_embeddings_difference(fused_features, patch_features, save_path='embedding_difference.png')
+            visualize_embeddings(patch_features, fused_features, save_path='embedding_distribution.png')
+            visualize_gate_weights(gate_weights, save_path='gate_weights_distribution.png')
         
         # Make predictions
         predictions = einops.rearrange(combined_features, '(b n) d -> b n d', b=B, n=n_vars)  # [B, n_vars, d_model]

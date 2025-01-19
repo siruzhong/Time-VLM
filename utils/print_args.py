@@ -63,8 +63,6 @@ def print_hyperparameters(args):
     print("\033[1m" + "Hyperparameters" + "\033[0m")
     print(f'  {"VLM Type:":<20}{args.vlm_type:<20}')
     print(f'  {"Image Size:":<20}{args.image_size:<20}')
-    predictor_hidden_dims_str = ', '.join(map(str, args.predictor_hidden_dims)) if isinstance(args.predictor_hidden_dims, list) else str(args.predictor_hidden_dims)
-    print(f'  {"Predictor Hidden Dims:":<20}{predictor_hidden_dims_str:<20}')
     print(f'  {"Periodicity:":<20}{args.periodicity:<20}')
     print(f'  {"Interpolation:":<20}{args.interpolation:<20}')
     print(f'  {"Norm Const:":<20}{args.norm_const:<20}')
@@ -80,6 +78,7 @@ def print_hyperparameters(args):
     print(f'  {"Without Visual:":<20}{args.w_out_visual:<20}')
     print(f'  {"Without Text:":<20}{args.w_out_text:<20}')
     print(f'  {"Without Query:":<20}{args.w_out_query:<20}')
+    print(f'  {"Visualize Embeddings:":<20}{args.visualize_embeddings:<20}')
     print()
     if args.task_name == 'zero_shot_forecast':
         print(f"[Zero-Shot] Source data: {args.data}, Target data: {args.target_data}")

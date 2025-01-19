@@ -13,7 +13,7 @@ class Exp_Basic(object):
             'TimesNet': TimesNet,
             'Autoformer': Autoformer,
             'Transformer': Transformer,
-            'Nonstationary_Transformer': Nonstationary_Transformer,
+            'Stationary': Nonstationary_Transformer,
             'DLinear': DLinear,
             'FEDformer': FEDformer,
             'Informer': Informer,
@@ -54,9 +54,6 @@ class Exp_Basic(object):
         if args.model == 'TimeVLM':
             from src.TimeVLM import model as TimeVLM
             self.model_dict['TimeVLM'] = TimeVLM
-        if args.model == 'TimeVLM_vlm':
-            from src.TimeVLM import model_vlm as TimeVLM_vlm
-            self.model_dict['TimeVLM_vlm'] = TimeVLM_vlm
         if args.model == 'LDM4TS':
             from src.LDM4TS import model as LDM4TS
             self.model_dict['LDM4TS'] = LDM4TS

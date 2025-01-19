@@ -101,7 +101,6 @@ if __name__ == '__main__':
     # hyperparameters
     parser.add_argument('--vlm_type', type=str, default='CLIP', help='VLM model type, e.g. CLIP, BLIP2, etc.')
     parser.add_argument('--image_size', type=int, default=224, help='image size for time series to image')
-    parser.add_argument('--predictor_hidden_dims', type=int, default=16, help='hidden layer dimensions of predictor')
     parser.add_argument('--periodicity', type=int, default=96)
     parser.add_argument('--interpolation', type=str, default='bilinear')
     parser.add_argument('--norm_const', type=float, default=0.4)
@@ -109,10 +108,11 @@ if __name__ == '__main__':
     parser.add_argument('--finetune_vlm', type=str2bool, default=False, help='finetune VLM model')
     parser.add_argument('--learnable_image', type=str2bool, default=True, help='learnable image')
     parser.add_argument('--save_images', type=str2bool, default=False, help='save images')
-    parser.add_argument('--use_cross_attention', type=str2bool, default=True, help='use cross attention to fuse image and text embeddings')
+    parser.add_argument('--use_cross_attention', type=str2bool, default=True, help='use cross attention to fuse image and text embeddings in customVLM')
     parser.add_argument('--w_out_visual', type=str2bool, default=False, help='without visual part')
     parser.add_argument('--w_out_text', type=str2bool, default=False, help='without text part')
     parser.add_argument('--w_out_query', type=str2bool, default=False, help='without query part')
+    parser.add_argument('--visualize_embeddings', type=str2bool, default=False, help='visualize embeddings')
 
     # GPU
     parser.add_argument('--use_gpu', type=bool, default=True, help='use gpu')
