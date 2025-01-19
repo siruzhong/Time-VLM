@@ -3,7 +3,6 @@ model_name=TimeVLM
 vlm_type=vilt
 gpu=0
 image_size=56
-predictor_hidden_dims=128
 periodicity=96
 norm_const=0.4
 three_channel_image=True
@@ -36,7 +35,6 @@ python -u run.py \
   --gpu $gpu \
   --use_amp \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -69,7 +67,6 @@ python -u run.py \
   --gpu $gpu \
   --use_amp \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -102,7 +99,6 @@ python -u run.py \
   --gpu $gpu \
   --use_amp \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \
@@ -135,7 +131,6 @@ python -u run.py \
   --gpu $gpu \
   --use_amp \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity $periodicity \
   --three_channel_image $three_channel_image \

@@ -3,7 +3,6 @@ model_name=TimeVLM
 vlm_type=vilt
 gpu=1
 image_size=56
-predictor_hidden_dims=128
 norm_const=0.4
 three_channel_image=True
 finetune_vlm=False
@@ -30,7 +29,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 3 \
   --three_channel_image $three_channel_image \
@@ -59,7 +57,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 1 \
   --three_channel_image $three_channel_image \
@@ -88,7 +85,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 4 \
   --three_channel_image $three_channel_image \
@@ -117,7 +113,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 4 \
   --three_channel_image $three_channel_image \
@@ -146,7 +141,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 1 \
   --three_channel_image $three_channel_image \
@@ -177,7 +171,6 @@ python -u run.py \
   --itr 1 \
   --loss 'SMAPE' \
   --image_size $image_size \
-  --predictor_hidden_dims $predictor_hidden_dims \
   --norm_const $norm_const \
   --periodicity 24 \
   --three_channel_image $three_channel_image \
